@@ -53,8 +53,8 @@ cached comp = Component $ \props -> do
 
 useCache :: forall sentinel a. (Typeable a, Eq sentinel, Typeable sentinel) => sentinel -> React a -> React a
 useCache sentinel m = shadowStateMap "cached" $ do
-    (val, setVal) <- useState "val-cache" (Nothing :: Maybe a)
-    (savedSentinel, setSentinel) <- useState "sentinel" sentinel
+    (val, setVal) <- useNonRenderingState "val-cache" (Nothing :: Maybe a)
+    (savedSentinel, setSentinel) <- useNonRenderingState "sentinel" sentinel
     let refreshCache = do
             newVal <- m
             useSynchronous (setVal (const (Just newVal)))
@@ -69,7 +69,7 @@ useCache sentinel m = shadowStateMap "cached" $ do
 useSynchronous :: IO a -> React a
 useSynchronous m = React (liftIO m)
 
-newtype StateMap = StateMap (IO SMap, (SMap -> SMap) -> IO ())
+newtype StateMap = StateMap (IO SMap, Bool -> (SMap -> SMap) -> IO ())
 
 withContext :: Typeable ctx => ctx -> React a -> React a
 withContext ctx = local (TM.insert ctx)
@@ -90,15 +90,15 @@ alterTRM f trm =
         Nothing -> TRM.delete @a trm
         Just r -> TRM.insert @a r trm
 
-useState :: forall s. Typeable s => String -> s -> React (s, (s -> s) -> IO ())
-useState stateID def = do
+useState' :: forall s. Typeable s => String -> s -> React (s, Bool -> (s -> s) -> IO ())
+useState' stateID def = do
     CompID cid <- useContextWithDefault (CompID "")
     (StateMap (getStates, updater)) <- fromJust <$> useContext
     smap <- React (liftIO (TRM.lookup <$> getStates))
     let s = fromMaybe def $ do
                 sm <- smap
                 M.lookup (cid, stateID) sm
-    return (s, updater . updateTM cid)
+    return (s, \rerender f -> updater rerender $ updateTM cid $ f)
   where
     updateTM :: String -> (s -> s) -> (SMap -> SMap)
     updateTM cid f typemap = do
@@ -107,6 +107,11 @@ useState stateID def = do
           Just r -> Just $ flip (flip M.alter (cid, stateID)) r $ \case
             Nothing -> Just $ f def
             Just a -> Just $ f a
+
+useState :: forall s. Typeable s => String -> s -> React (s, (s -> s) -> IO ())
+useState stateID s = (fmap . fmap) ($ True) $ useState' stateID s
+useNonRenderingState :: forall s. Typeable s => String -> s -> React (s, (s -> s) -> IO ())
+useNonRenderingState stateID s = (fmap . fmap) ($ False) $ useState' stateID s
 
 newtype EffectTracker a = EffectTracker (Bool, a)
   deriving Eq
@@ -148,7 +153,7 @@ newtype ShadowedState = ShadowedState SMap
 
 shadowStateMap :: EffectName -> React a -> React a
 shadowStateMap effectName child = do
-    (ShadowedState stateMap, updater) <- useState effectName (ShadowedState mempty)
+    (ShadowedState stateMap, updater) <- useState' effectName (ShadowedState mempty)
     withContext (StateMap (return stateMap, coerce updater)) child
 
 render ::  Component props -> props -> IO ()
@@ -159,15 +164,20 @@ render (Component renderComponent) props = do
     forever $ do
         pic <- flip runReaderT mempty
              . runReact
-             . withContext (StateMap (readTVarIO stateMapVar, atomically . writeTQueue stateQueue))
+             . withContext (StateMap (readTVarIO stateMapVar, \rerender f -> atomically . writeTQueue stateQueue $ (rerender, f)))
              .  withContext (EventGetter $ nextEvent vty)
              .  withContext (Shutdown $ shutdown vty)
              .  withContext (CompID "root")
              $ (renderComponent props)
         update vty (Vty.picForImage pic)
-        atomically $ do
-            f <- readTQueue stateQueue
-            modifyTVar' stateMapVar f
+        fix $ \recurse -> do
+            rerender <- atomically $ do
+                (rerender, f) <- readTQueue stateQueue
+                modifyTVar' stateMapVar f
+                return rerender
+            if rerender
+                then return ()
+                else recurse
     shutdown vty
 
 renderText :: TL.Text -> React Image

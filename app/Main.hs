@@ -45,8 +45,9 @@ cachedTimer = Component $ \() -> do
         forever $ do
             threadDelay 1000000
             setCounter succ
-    mountComponent (sayHelloTo) "say-hello" (TL.pack $ show counter)
-    renderText $ "Counter: " <> TL.pack (show counter)
+    mountComponent (cached sayHelloTo) "say-hello" (TL.pack $ show counter)
+
+    -- renderText $ "Counter: " <> TL.pack (show counter)
 
 favNumber :: Component ()
 favNumber = Component $ \() -> do
