@@ -1,13 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
 module Main where
 
 import Graphics.Vty as Vty
+import Graphics.Vty.Input.Events as Vty
 import Lib
 import qualified Data.Text.Lazy as TL
 import Control.Concurrent
 import Control.Monad
+
 
 helloWorld :: Component ()
 helloWorld = Component $ \_ -> do
@@ -34,5 +37,22 @@ timer = Component $ \() -> do
             setCounter succ
     renderText $ "Counter: " <> TL.pack (show counter)
 
+lastKey :: Component ()
+lastKey = Component $ \() -> do
+    (keypress, setKeypress) <- useState "No events"
+    shutdown <- useShutdown
+    useTermEvent $ \case
+      Vty.EvKey (Vty.KChar 'q') _ -> shutdown
+      Vty.EvKey key _ ->
+          setKeypress (const $ TL.pack $ show key)
+      _ -> return ()
+    renderText $ "Last Keypress: " <> keypress
+
+something :: Component ()
+something = Component $ \_ -> do
+  i1 <- runComponent timer ()
+  i2 <- runComponent lastKey ()
+  return (i1 Vty.<-> i2)
+
 main :: IO ()
-main = render timer ()
+main = render something ()

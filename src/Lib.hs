@@ -4,6 +4,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module Lib where
 
@@ -27,7 +28,7 @@ newtype React a =
           deriving newtype (Functor, Applicative, Monad, MonadReader TM.TMap)
 
 newtype Component props =
-    Component { runComponent :: props -> React Vty.Picture
+    Component { runComponent :: props -> React Vty.Image
               }
 
 newtype StateMap = StateMap (TQueue (TM.TMap -> TM.TMap), TVar TM.TMap)
@@ -68,21 +69,44 @@ useEffect sentinel effect = do
   where
     runEffect = void . React . liftIO $ forkIO effect
 
+newtype EventGetter = EventGetter (IO Vty.Event)
+
+
+useTermEvent :: (Vty.Event -> IO ()) -> React ()
+useTermEvent handler = do
+    useContext >>= \case
+      Just (EventGetter getEvent) ->
+        useEffect @"blah" () $ do
+            forever $ getEvent >>= handler
+      Nothing -> return ()
+
+newtype Shutdown = Shutdown (IO ())
+
+useShutdown :: React (IO ())
+useShutdown = do
+    useContext >>= \case
+      Just (Shutdown shutdown) ->
+          return shutdown
+      Nothing -> return (return ())
+
 render ::  Component props -> props -> IO ()
 render (Component renderComponent) props = do
     vty <- Vty.mkVty Vty.defaultConfig
     (stateMap :: TVar TM.TMap) <- newTVarIO mempty
     stateQueue <- newTQueueIO
-    pic <- flip runReaderT mempty . runReact . withContext (StateMap (stateQueue, stateMap)) $ (renderComponent props)
-    update vty pic
     forever $ do
+        pic <- flip runReaderT mempty
+             . runReact
+             . withContext (StateMap (stateQueue, stateMap))
+             .  withContext (EventGetter $ nextEvent vty)
+             .  withContext (Shutdown $ shutdown vty)
+             $ (renderComponent props)
+        update vty (Vty.picForImage pic)
         atomically $ do
             f <- readTQueue stateQueue
             modifyTVar' stateMap f
-        pic <- flip runReaderT mempty . runReact . withContext (StateMap (stateQueue, stateMap)) $ (renderComponent props)
-        update vty pic
     getLine
     shutdown vty
 
-renderText :: TL.Text -> React Picture
-renderText = return . Vty.picForImage . Vty.text Vty.defAttr
+renderText :: TL.Text -> React Image
+renderText = return . Vty.text Vty.defAttr
