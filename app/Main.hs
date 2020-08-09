@@ -1,9 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE DataKinds #-}
 module Main where
 
 import Graphics.Vty as Vty
 import Lib
 import qualified Data.Text.Lazy as TL
+import Control.Concurrent
+import Control.Monad
 
 helloWorld :: Component ()
 helloWorld = Component $ \_ -> do
@@ -20,5 +24,15 @@ sayHelloTo :: Component TL.Text
 sayHelloTo = Component $ \name -> do
     withContext (Name name) $ runComponent sayHello ()
 
+
+timer :: Component ()
+timer = Component $ \() -> do
+    (counter, setCounter) <- useState (0 :: Int)
+    useEffect @"counter" () $ do
+        forever $ do
+            threadDelay 1000000
+            setCounter succ
+    renderText $ "Counter: " <> TL.pack (show counter)
+
 main :: IO ()
-main = render sayHelloTo "Bob"
+main = render timer ()

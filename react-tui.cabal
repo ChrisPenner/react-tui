@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: cc9905f247579574773218d29d922d140af047b8930e8fffd216934ce48a0f2d
+-- hash: 30ed48177b8226b1efb91a4f02b33992a2ac3571294f853495fe81370bdd6cf6
 
 name:           react-tui
 version:        0.1.0.0
@@ -37,6 +37,7 @@ library
     , containers
     , lens
     , mtl
+    , stm
     , text
     , typerep-map
     , vty
@@ -55,6 +56,7 @@ executable react-tui-exe
     , lens
     , mtl
     , react-tui
+    , stm
     , text
     , typerep-map
     , vty
@@ -74,6 +76,7 @@ test-suite react-tui-test
     , lens
     , mtl
     , react-tui
+    , stm
     , text
     , typerep-map
     , vty

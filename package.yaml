@@ -27,6 +27,7 @@ dependencies:
 - lens
 - mtl
 - typerep-map
+- stm
 
 library:
   source-dirs: src
