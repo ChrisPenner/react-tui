@@ -9,7 +9,8 @@
 {-# LANGUAGE NamedFieldPuns #-}
 module Lib where
 
-import Graphics.Vty as Vty
+import qualified Graphics.Vty as Vty
+import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.State
 import qualified Data.TypeRepMap as TRM
@@ -57,13 +58,13 @@ useCache sentinel m = shadowStateMap "cached" $ do
     (savedSentinel, setSentinel) <- useNonRenderingState "sentinel" sentinel
     let refreshCache = do
             newVal <- m
-            useSynchronous (setVal (const (Just newVal)))
+            setVal (const (Just newVal))
             return newVal
     result <- case (val, savedSentinel == sentinel) of
         (Nothing, _) -> refreshCache
         (_, False) -> refreshCache
         (Just valCache, _) -> return valCache
-    useSynchronous $ (setSentinel (const sentinel))
+    setSentinel (const sentinel)
     return result
 
 useSynchronous :: IO a -> React a
@@ -110,18 +111,18 @@ useState' stateID def = do
 
 useState :: forall s. Typeable s => String -> s -> React (s, (s -> s) -> IO ())
 useState stateID s = (fmap . fmap) ($ True) $ useState' stateID s
-useNonRenderingState :: forall s. Typeable s => String -> s -> React (s, (s -> s) -> IO ())
-useNonRenderingState stateID s = (fmap . fmap) ($ False) $ useState' stateID s
+useNonRenderingState :: forall s. Typeable s => String -> s -> React (s, (s -> s) -> React ())
+useNonRenderingState stateID s = (fmap . fmap) (\f -> useSynchronous . f False) $ useState' stateID s
 
 newtype EffectTracker a = EffectTracker (Bool, a)
   deriving Eq
 
 useEffect :: forall sentinel. (Typeable sentinel, Eq sentinel) => EffectName -> sentinel -> IO () -> React ()
 useEffect effectName sentinel effect = do
-    (EffectTracker (initialized, sentinel') :: EffectTracker sentinel, setSentinel) <- useState effectName (EffectTracker (False, sentinel))
+    (EffectTracker (initialized, sentinel') :: EffectTracker sentinel, setSentinel) <- useNonRenderingState effectName (EffectTracker (False, sentinel))
     if not initialized || sentinel /= sentinel'
        then do
-           React (liftIO $ setSentinel (const (EffectTracker (True, sentinel'))))
+           setSentinel (const (EffectTracker (True, sentinel')))
            runEffect
        else return ()
   where
@@ -156,29 +157,37 @@ shadowStateMap effectName child = do
     (ShadowedState stateMap, updater) <- useState' effectName (ShadowedState mempty)
     withContext (StateMap (return stateMap, coerce updater)) child
 
+data AppState = ReRender | AwaitChange | ShutdownApp
+  deriving Eq
 render ::  Component props -> props -> IO ()
 render (Component renderComponent) props = do
     vty <- Vty.mkVty Vty.defaultConfig
     (stateMapVar :: TVar SMap) <- newTVarIO mempty
     stateQueue <- newTQueueIO
-    forever $ do
+    quitVar <- newTVarIO False
+    fix $ \loop -> do
         pic <- flip runReaderT mempty
              . runReact
              . withContext (StateMap (readTVarIO stateMapVar, \rerender f -> atomically . writeTQueue stateQueue $ (rerender, f)))
-             .  withContext (EventGetter $ nextEvent vty)
-             .  withContext (Shutdown $ shutdown vty)
+             .  withContext (EventGetter $ Vty.nextEvent vty)
+             .  withContext (Shutdown . atomically $ writeTVar quitVar True)
              .  withContext (CompID "root")
              $ (renderComponent props)
-        update vty (Vty.picForImage pic)
-        fix $ \recurse -> do
-            rerender <- atomically $ do
-                (rerender, f) <- readTQueue stateQueue
-                modifyTVar' stateMapVar f
-                return rerender
-            if rerender
-                then return ()
-                else recurse
-    shutdown vty
+        Vty.update vty (Vty.picForImage pic)
+        appState <- fix $ \recurse -> do
+            appState <- atomically $ do
+                let checkQuit = readTVar quitVar >>= check >> return ShutdownApp
+                orElse checkQuit $ do
+                    (rerender, f) <- readTQueue stateQueue
+                    modifyTVar' stateMapVar f
+                    if rerender then return ReRender
+                                else return AwaitChange
+            if appState == AwaitChange
+               then recurse
+               else return appState
+        case appState of
+            ShutdownApp -> Vty.shutdown vty
+            _ -> loop
 
-renderText :: TL.Text -> React Image
+renderText :: TL.Text -> React Vty.Image
 renderText = return . Vty.text Vty.defAttr
