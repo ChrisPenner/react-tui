@@ -10,6 +10,7 @@ import Lib
 import qualified Data.Text.Lazy as TL
 import Control.Concurrent
 import Control.Monad
+import qualified Data.List as L
 
 
 helloWorld :: Component ()
@@ -52,9 +53,18 @@ lastKey = Component $ \() -> do
       _ -> return ()
     renderText $ "Last Keypress: " <> keypress
 
+boxed :: Component a -> Component a
+boxed cmp = Component $ \props -> do
+    img <- mountComponent cmp "child" props
+    let w = Vty.imageWidth img
+    let h = Vty.imageHeight img
+    let horBorder = Vty.text defAttr $ TL.replicate (fromIntegral w) "#"
+    let vertBorder = vertCat $ L.replicate (h + 2) (Vty.text defAttr "#")
+    return $ vertBorder Vty.<|> (horBorder <-> img <-> horBorder) Vty.<|> vertBorder
+
 something :: Component ()
-something = Component $ \_ -> do
-  i1 <- mountComponent timer "timer" ()
+something = boxed $ Component $ \_ -> do
+  i1 <- mountComponent (boxed timer) "timer" ()
   i2 <- mountComponent favNumber "fav-number" ()
   i3 <- mountComponent lastKey "last-key" ()
   return (i1 Vty.<-> i2 Vty.<-> i3)

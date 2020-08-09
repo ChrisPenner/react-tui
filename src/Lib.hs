@@ -25,9 +25,9 @@ import GHC.TypeLits
 import Data.Coerce
 import qualified Data.Map as M
 
--- Scope component's state
--- Component lifecycle
+-- ✅ Scope component's state
 -- Higher order component: wrapping components
+-- Component lifecycle
 
 type SMap = TRM.TypeRepMap (M.Map (String, String))
 type EffectName = String
@@ -41,7 +41,6 @@ newtype React a =
 newtype Component props =
     Component { renderComponent :: props -> React Vty.Image
               }
-
 
 mountComponent ::  Component props -> EffectName -> props -> React Vty.Image
 mountComponent (Component {renderComponent}) effectName props = do
