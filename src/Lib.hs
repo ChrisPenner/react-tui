@@ -26,7 +26,7 @@ import Data.Coerce
 import qualified Data.Map as M
 
 -- ✅ Scope component's state
--- Higher order component: wrapping components
+-- ✅ Higher order component: wrapping components
 -- Component lifecycle
 
 type SMap = TRM.TypeRepMap (M.Map (String, String))
@@ -42,9 +42,32 @@ newtype Component props =
     Component { renderComponent :: props -> React Vty.Image
               }
 
-mountComponent ::  Component props -> EffectName -> props -> React Vty.Image
-mountComponent (Component {renderComponent}) effectName props = do
-    shadowStateMap effectName (renderComponent props)
+mountComponent ::  Component props -> ComponentID -> props -> React Vty.Image
+mountComponent (Component {renderComponent}) componentID props = do
+    shadowStateMap componentID (renderComponent props)
+
+cached :: (Typeable props, Eq props) => Component props -> Component props
+cached comp = Component $ \props -> do
+    useCache props $ do
+        mountComponent comp "child2" props
+
+useCache :: forall sentinel a. (Typeable a, Eq sentinel, Typeable sentinel) => sentinel -> React a -> React a
+useCache sentinel m = shadowStateMap "cached" $ do
+    (val, setVal) <- useState "val-cache" (Nothing :: Maybe a)
+    (savedSentinel, setSentinel) <- useState "sentinel" sentinel
+    let refreshCache = do
+            newVal <- m
+            useSynchronous (setVal (const (Just newVal)))
+            return newVal
+    result <- case (val, savedSentinel == sentinel) of
+        (Nothing, _) -> refreshCache
+        (_, False) -> refreshCache
+        (Just valCache, _) -> return valCache
+    useSynchronous $ (setSentinel (const sentinel))
+    return result
+
+useSynchronous :: IO a -> React a
+useSynchronous m = React (liftIO m)
 
 newtype StateMap = StateMap (IO SMap, (SMap -> SMap) -> IO ())
 

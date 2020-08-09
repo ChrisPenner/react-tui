@@ -32,9 +32,20 @@ timer :: Component ()
 timer = Component $ \() -> do
     (counter, setCounter) <- useState "counter-state" (0 :: Int)
     useEffect "counter-effect" () $ do
+        print "Kicking off timer"
         forever $ do
             threadDelay 1000000
             setCounter succ
+    renderText $ "Counter: " <> TL.pack (show counter)
+
+cachedTimer :: Component ()
+cachedTimer = Component $ \() -> do
+    (counter, setCounter) <- useState "counter-state" (0 :: Int)
+    useEffect "counter-effect" () $ do
+        forever $ do
+            threadDelay 1000000
+            setCounter succ
+    mountComponent (sayHelloTo) "say-hello" (TL.pack $ show counter)
     renderText $ "Counter: " <> TL.pack (show counter)
 
 favNumber :: Component ()
@@ -63,8 +74,8 @@ boxed cmp = Component $ \props -> do
     return $ vertBorder Vty.<|> (horBorder <-> img <-> horBorder) Vty.<|> vertBorder
 
 something :: Component ()
-something = boxed $ Component $ \_ -> do
-  i1 <- mountComponent (boxed timer) "timer" ()
+something = Component $ \_ -> do
+  i1 <- mountComponent (cachedTimer) "timer" ()
   i2 <- mountComponent favNumber "fav-number" ()
   i3 <- mountComponent lastKey "last-key" ()
   return (i1 Vty.<-> i2 Vty.<-> i3)
