@@ -25,23 +25,27 @@ sayHello = Component $ \_ -> do
 
 sayHelloTo :: Component TL.Text
 sayHelloTo = Component $ \name -> do
-    withContext (Name name) $ runComponent sayHello ()
-
+    withContext (Name name) $ mountComponent sayHello "hello" ()
 
 timer :: Component ()
 timer = Component $ \() -> do
-    (counter, setCounter) <- useState (0 :: Int)
-    useEffect @"counter" () $ do
+    (counter, setCounter) <- useState "counter-state" (0 :: Int)
+    useEffect "counter-effect" () $ do
         forever $ do
             threadDelay 1000000
             setCounter succ
     renderText $ "Counter: " <> TL.pack (show counter)
 
+favNumber :: Component ()
+favNumber = Component $ \() -> do
+    (favNumber, _) <- useState "fav" (42 :: Int)
+    renderText $ "Favourite Number: " <> TL.pack (show favNumber)
+
 lastKey :: Component ()
 lastKey = Component $ \() -> do
-    (keypress, setKeypress) <- useState "No events"
+    (keypress, setKeypress) <- useState "last-event" "No events"
     shutdown <- useShutdown
-    useTermEvent $ \case
+    useTermEvent "listener" $ \case
       Vty.EvKey (Vty.KChar 'q') _ -> shutdown
       Vty.EvKey key _ ->
           setKeypress (const $ TL.pack $ show key)
@@ -50,9 +54,10 @@ lastKey = Component $ \() -> do
 
 something :: Component ()
 something = Component $ \_ -> do
-  i1 <- runComponent timer ()
-  i2 <- runComponent lastKey ()
-  return (i1 Vty.<-> i2)
+  i1 <- mountComponent timer "timer" ()
+  i2 <- mountComponent favNumber "fav-number" ()
+  i3 <- mountComponent lastKey "last-key" ()
+  return (i1 Vty.<-> i2 Vty.<-> i3)
 
 main :: IO ()
 main = render something ()
