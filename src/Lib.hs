@@ -26,10 +26,12 @@ import GHC.TypeLits
 import Data.Coerce
 import qualified Data.Map as M
 import Data.Bifunctor
+import qualified Data.Set as S
 
 -- ✅ Scope component's state
 -- ✅ Higher order component: wrapping components
--- Component lifecycle
+-- Re-render cached on context.
+-- Component lifecycle & component cleanup
 
 type SMap = TRM.TypeRepMap (M.Map (String, String))
 type EffectName = String
@@ -72,13 +74,16 @@ once effectName action = do
 
 useCache :: forall sentinel a. (Typeable a, Eq sentinel, Typeable sentinel) => EffectName -> sentinel -> React a -> React a
 useCache effectName sentinel m = do
-    StateMap (getStates, updater) <- fromJust <$> useContext
+    StateMap (getStates, updater) <- fromJust <$> useContextUntraced
     (lastSentinelVar, setSentinel) <- useNonRenderingState (effectName <> "sentinel") sentinel
     let propsChanged = lastSentinelVar /= sentinel
     setSentinel (const sentinel)
     -- Start off dirty so we render the first time
     (isDirty, setDirty) <- useState' (effectName <> "dirty") True
     useSynchronous . atomically $ setDirty False (const False)
+
+    -- (lastContextDeps, setContextDeps) <- useNonRenderingState (effectName <> "context-deps") (mempty :: S.Set TypeRep)
+
     (val, setVal) <- useNonRenderingState (effectName <> "cacheState") (Nothing :: Maybe a)
     case val of
         Just a | not isDirty && not propsChanged -> return a
@@ -96,8 +101,17 @@ newtype StateMap = StateMap (STM SMap, Bool -> (SMap -> SMap) -> STM ())
 withContext :: Typeable ctx => ctx -> React a -> React a
 withContext ctx = local (TM.insert ctx)
 
-useContext :: Typeable a => React (Maybe a)
+newtype RegisterContextTracking = RegisterContextTracking (TypeRep -> React ())
+useContext :: forall a. Typeable a => React (Maybe a)
 useContext = do
+    -- If we're tracing context usages, add the dependency
+    useContextUntraced >>= \case
+      Just (RegisterContextTracking register) -> register $ typeRep (Proxy @a)
+      _ -> return ()
+    useContextUntraced
+
+useContextUntraced :: Typeable a => React (Maybe a)
+useContextUntraced = do
     asks TM.lookup
 
 useContextWithDefault :: Typeable a => a -> React a
@@ -115,7 +129,7 @@ alterTRM f trm =
 useState' :: forall s. Typeable s => String -> s -> React (s, Bool -> (s -> s) -> STM ())
 useState' stateID def = do
     CompID cid <- useContextWithDefault (CompID "")
-    (StateMap (getStates, updater)) <- fromJust <$> useContext
+    (StateMap (getStates, updater)) <- fromJust <$> useContextUntraced
     smap <- React (liftIO (TRM.lookup <$> atomically getStates))
     let s = fromMaybe def $ do
                 sm <- smap
