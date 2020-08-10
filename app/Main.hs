@@ -12,6 +12,7 @@ import Control.Concurrent
 import Control.Monad
 import qualified Data.List as L
 
+import GHC.Clock
 
 helloWorld :: Component ()
 helloWorld = Component $ \_ -> do
@@ -38,29 +39,22 @@ timer = Component $ \() -> do
             setCounter succ
     renderText $ "Counter: " <> TL.pack (show counter)
 
-cachedTimer :: Component ()
-cachedTimer = Component $ \() -> do
-    (counter, setCounter) <- useState "counter-state" (0 :: Int)
-    useEffect "counter-effect" () $ do
-        forever $ do
-            threadDelay 1000000
-            setCounter succ
-    mountComponent (cached sayHelloTo) "say-hello" (TL.pack $ show counter)
-
-    -- renderText $ "Counter: " <> TL.pack (show counter)
-
 favNumber :: Component ()
 favNumber = Component $ \() -> do
     (favNumber, _) <- useState "fav" (42 :: Int)
     renderText $ "Favourite Number: " <> TL.pack (show favNumber)
 
 lastKey :: Component ()
-lastKey = Component $ \() -> do
+lastKey = cached "last" $ Component $ \() -> do
+    debug "Rendered!"
+
     (keypress, setKeypress) <- useState "last-event" "No events"
     shutdown <- useShutdown
     useTermEvent "listener" $ \case
       Vty.EvKey (Vty.KChar 'q') _ -> shutdown
-      Vty.EvKey key _ ->
+      Vty.EvKey (Vty.KChar 'c') _ -> shutdown
+      Vty.EvKey key _ -> do
+          debugIO ("Got a key:", key)
           setKeypress (const $ TL.pack $ show key)
       _ -> return ()
     renderText $ "Last Keypress: " <> keypress
@@ -76,7 +70,7 @@ boxed cmp = Component $ \props -> do
 
 something :: Component ()
 something = Component $ \_ -> do
-  i1 <- mountComponent (cachedTimer) "timer" ()
+  i1 <- mountComponent timer "timer" ()
   i2 <- mountComponent favNumber "fav-number" ()
   i3 <- mountComponent lastKey "last-key" ()
   return (i1 Vty.<-> i2 Vty.<-> i3)

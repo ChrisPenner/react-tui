@@ -25,6 +25,7 @@ import Control.Monad.STM
 import GHC.TypeLits
 import Data.Coerce
 import qualified Data.Map as M
+import Data.Bifunctor
 
 -- ✅ Scope component's state
 -- ✅ Higher order component: wrapping components
@@ -33,6 +34,11 @@ import qualified Data.Map as M
 type SMap = TRM.TypeRepMap (M.Map (String, String))
 type EffectName = String
 type ComponentID = String
+
+debug :: Show a => a -> React ()
+debug = useSynchronous . debugIO
+debugIO :: Show a => a -> IO ()
+debugIO msg = appendFile "log" (show msg <> "\n")
 
 newtype React a =
     React { runReact :: ReaderT TM.TMap IO a
@@ -47,30 +53,45 @@ mountComponent ::  Component props -> ComponentID -> props -> React Vty.Image
 mountComponent (Component {renderComponent}) componentID props = do
     shadowStateMap componentID (renderComponent props)
 
-cached :: (Typeable props, Eq props) => Component props -> Component props
-cached comp = Component $ \props -> do
-    useCache props $ do
-        mountComponent comp "child2" props
+cached :: (Typeable props, Eq props) => ComponentID -> Component props -> Component props
+cached componentName comp = Component $ \props -> do
+    useCache componentName props $ do
+        mountComponent comp (componentName <> "cached") props
 
-useCache :: forall sentinel a. (Typeable a, Eq sentinel, Typeable sentinel) => sentinel -> React a -> React a
-useCache sentinel m = shadowStateMap "cached" $ do
-    (val, setVal) <- useNonRenderingState "val-cache" (Nothing :: Maybe a)
-    (savedSentinel, setSentinel) <- useNonRenderingState "sentinel" sentinel
-    let refreshCache = do
-            newVal <- m
-            setVal (const (Just newVal))
-            return newVal
-    result <- case (val, savedSentinel == sentinel) of
-        (Nothing, _) -> refreshCache
-        (_, False) -> refreshCache
-        (Just valCache, _) -> return valCache
+newtype Once a = Once (Maybe a)
+-- Only for super-quick setup methods, don't expose this.
+once :: Typeable a => EffectName -> IO a -> React a
+once effectName action = do
+    (Once m, setOnce) <- useNonRenderingState effectName (Once Nothing)
+    case m of
+        Just a -> return a
+        Nothing -> do
+            a <- useSynchronous action
+            setOnce . const . Once . Just $ a
+            return a
+
+useCache :: forall sentinel a. (Typeable a, Eq sentinel, Typeable sentinel) => EffectName -> sentinel -> React a -> React a
+useCache effectName sentinel m = do
+    StateMap (getStates, updater) <- fromJust <$> useContext
+    (lastSentinelVar, setSentinel) <- useNonRenderingState (effectName <> "sentinel") sentinel
+    let propsChanged = lastSentinelVar /= sentinel
     setSentinel (const sentinel)
-    return result
+    -- Start off dirty so we render the first time
+    (isDirty, setDirty) <- useState' (effectName <> "dirty") True
+    useSynchronous . atomically $ setDirty False (const False)
+    (val, setVal) <- useNonRenderingState (effectName <> "cacheState") (Nothing :: Maybe a)
+    case val of
+        Just a | not isDirty && not propsChanged -> return a
+        _ -> do
+            withContext (StateMap (getStates, \b f -> updater b f *> setDirty True (const True))) $ do
+                a <- m
+                setVal (const $ Just a)
+                return a
 
 useSynchronous :: IO a -> React a
 useSynchronous m = React (liftIO m)
 
-newtype StateMap = StateMap (IO SMap, Bool -> (SMap -> SMap) -> IO ())
+newtype StateMap = StateMap (STM SMap, Bool -> (SMap -> SMap) -> STM ())
 
 withContext :: Typeable ctx => ctx -> React a -> React a
 withContext ctx = local (TM.insert ctx)
@@ -91,11 +112,11 @@ alterTRM f trm =
         Nothing -> TRM.delete @a trm
         Just r -> TRM.insert @a r trm
 
-useState' :: forall s. Typeable s => String -> s -> React (s, Bool -> (s -> s) -> IO ())
+useState' :: forall s. Typeable s => String -> s -> React (s, Bool -> (s -> s) -> STM ())
 useState' stateID def = do
     CompID cid <- useContextWithDefault (CompID "")
     (StateMap (getStates, updater)) <- fromJust <$> useContext
-    smap <- React (liftIO (TRM.lookup <$> getStates))
+    smap <- React (liftIO (TRM.lookup <$> atomically getStates))
     let s = fromMaybe def $ do
                 sm <- smap
                 M.lookup (cid, stateID) sm
@@ -110,9 +131,9 @@ useState' stateID def = do
             Just a -> Just $ f a
 
 useState :: forall s. Typeable s => String -> s -> React (s, (s -> s) -> IO ())
-useState stateID s = (fmap . fmap) ($ True) $ useState' stateID s
+useState stateID s = (fmap . fmap) (fmap atomically . ($ True)) $ useState' stateID s
 useNonRenderingState :: forall s. Typeable s => String -> s -> React (s, (s -> s) -> React ())
-useNonRenderingState stateID s = (fmap . fmap) (\f -> useSynchronous . f False) $ useState' stateID s
+useNonRenderingState stateID s = (fmap . fmap) (\f -> useSynchronous . atomically . f False) $ useState' stateID s
 
 newtype EffectTracker a = EffectTracker (Bool, a)
   deriving Eq
@@ -155,7 +176,7 @@ newtype ShadowedState = ShadowedState SMap
 shadowStateMap :: EffectName -> React a -> React a
 shadowStateMap effectName child = do
     (ShadowedState stateMap, updater) <- useState' effectName (ShadowedState mempty)
-    withContext (StateMap (return stateMap, coerce updater)) child
+    withContext (StateMap (return stateMap, \b f -> coerce updater b f)) child
 
 data AppState = ReRender | AwaitChange | ShutdownApp
   deriving Eq
@@ -168,7 +189,7 @@ render (Component renderComponent) props = do
     fix $ \loop -> do
         pic <- flip runReaderT mempty
              . runReact
-             . withContext (StateMap (readTVarIO stateMapVar, \rerender f -> atomically . writeTQueue stateQueue $ (rerender, f)))
+             . withContext (StateMap (readTVar stateMapVar, \rerender f -> writeTQueue stateQueue $ (rerender, f)))
              .  withContext (EventGetter $ Vty.nextEvent vty)
              .  withContext (Shutdown . atomically $ writeTVar quitVar True)
              .  withContext (CompID "root")
