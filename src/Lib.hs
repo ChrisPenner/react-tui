@@ -133,6 +133,10 @@ mountComponent (Component {renderComponent}) componentID props = do
 --             setOnce . const . Once . Just $ a
 --             return a
 
+useUnmount :: IO () -> React ()
+useUnmount m = do
+    useMemo () $ registerCleanup . useSynchronous $ m
+
 useCache :: forall sentinel a. (Typeable a, Eq sentinel, Typeable sentinel) =>  sentinel -> React a -> React a
 useCache sentinel m = do
     lastSentinel <- useLast sentinel
