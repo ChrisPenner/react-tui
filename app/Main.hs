@@ -36,9 +36,8 @@ simpleStateTracker = Component (const $ useState (0 :: Int) *> renderText "yo")
 timer :: Component ()
 timer = Component $ \() -> do
     (counter', setCounter') <- useState (0 :: Int)
-    if counter' < 4 then void $ mountComponent simpleStateTracker "asldkj" ()
+    if counter' < 4 then void $ debug "Triggered" *> mountComponent simpleStateTracker "asldkj" ()
                     else return ()
-    React get >>= debug
     (counter, setCounter) <- useState (0 :: Int)
     useEffect () $ do
         print "Kicking off timer"
@@ -55,15 +54,12 @@ favNumber = Component $ \() -> do
 
 lastKey :: Component ()
 lastKey = cached "last" $ Component $ \() -> do
-    debug "Rendered!"
-
     (keypress, setKeypress) <- useState "No events"
     shutdown <- useShutdown
     useTermEvent $ \case
       Vty.EvKey (Vty.KChar 'q') _ -> shutdown
       Vty.EvKey (Vty.KChar 'c') _ -> shutdown
       Vty.EvKey key _ -> do
-          debugIO ("Got a key:", key)
           setKeypress (const $ TL.pack $ show key)
       _ -> return ()
     renderText $ "Last Keypress: " <> keypress
