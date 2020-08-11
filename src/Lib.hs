@@ -53,14 +53,15 @@ newtype Component props =
 
 mountComponent ::  Component props -> ComponentID -> props -> React Vty.Image
 mountComponent (Component {renderComponent}) componentID props = do
-    -- We isolate the state counter every time we kick off a new component
-    let react = flip evalStateT 0 . runReact $ renderComponent props
-    withContext (CompID componentID) $ shadowStateMap $ React (lift react)
+    withContext (CompID componentID) $ shadowEffectNames $ shadowStateMap $ renderComponent props
   where
       shadowStateMap :: React a -> React a
       shadowStateMap child = do
         (ShadowedState stateMap, updater) <- useState' (ShadowedState mempty)
         withContext (StateMap (return stateMap, \b f -> coerce updater b f)) $ child
+      shadowEffectNames :: React a -> React a
+      shadowEffectNames (React m) =
+          React . lift $ flip evalStateT 0 m
 
 
 cached :: (Typeable props, Eq props) => ComponentID -> Component props -> Component props

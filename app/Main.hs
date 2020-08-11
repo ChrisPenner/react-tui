@@ -30,14 +30,22 @@ sayHelloTo :: Component TL.Text
 sayHelloTo = Component $ \name -> do
     withContext (Name name) $ mountComponent sayHello "hello" ()
 
+simpleStateTracker :: Component ()
+simpleStateTracker = Component (const $ useState (0 :: Int) *> renderText "yo")
+
 timer :: Component ()
 timer = Component $ \() -> do
+    (counter', setCounter') <- useState (0 :: Int)
+    if counter' < 4 then void $ mountComponent simpleStateTracker "asldkj" ()
+                    else return ()
+    React get >>= debug
     (counter, setCounter) <- useState (0 :: Int)
     useEffect () $ do
         print "Kicking off timer"
         forever $ do
             threadDelay 1000000
             setCounter succ
+            setCounter' succ
     renderText $ "Counter: " <> TL.pack (show counter)
 
 favNumber :: Component ()
