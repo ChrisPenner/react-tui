@@ -11,6 +11,7 @@ import qualified Data.Text.Lazy as TL
 import Control.Concurrent
 import Control.Monad
 import qualified Data.List as L
+import Control.Monad.State
 
 import GHC.Clock
 
@@ -31,8 +32,8 @@ sayHelloTo = Component $ \name -> do
 
 timer :: Component ()
 timer = Component $ \() -> do
-    (counter, setCounter) <- useState "counter-state" (0 :: Int)
-    useEffect "counter-effect" () $ do
+    (counter, setCounter) <- useState (0 :: Int)
+    useEffect () $ do
         print "Kicking off timer"
         forever $ do
             threadDelay 1000000
@@ -41,16 +42,16 @@ timer = Component $ \() -> do
 
 favNumber :: Component ()
 favNumber = Component $ \() -> do
-    (favNumber, _) <- useState "fav" (42 :: Int)
+    (favNumber, _) <- useState (42 :: Int)
     renderText $ "Favourite Number: " <> TL.pack (show favNumber)
 
 lastKey :: Component ()
 lastKey = cached "last" $ Component $ \() -> do
     debug "Rendered!"
 
-    (keypress, setKeypress) <- useState "last-event" "No events"
+    (keypress, setKeypress) <- useState "No events"
     shutdown <- useShutdown
-    useTermEvent "listener" $ \case
+    useTermEvent $ \case
       Vty.EvKey (Vty.KChar 'q') _ -> shutdown
       Vty.EvKey (Vty.KChar 'c') _ -> shutdown
       Vty.EvKey key _ -> do

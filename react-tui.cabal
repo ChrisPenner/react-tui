@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 30ed48177b8226b1efb91a4f02b33992a2ac3571294f853495fe81370bdd6cf6
+-- hash: 2333ab6e77efbdb225f3b6c2c00b1dd072504af71005469af5bed7c24362a584
 
 name:           react-tui
 version:        0.1.0.0
@@ -33,9 +33,9 @@ library
   hs-source-dirs:
       src
   build-depends:
-      base >=4.7 && <5
+      async
+    , base >=4.7 && <5
     , containers
-    , lens
     , mtl
     , stm
     , text
@@ -51,9 +51,9 @@ executable react-tui-exe
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      async
+    , base >=4.7 && <5
     , containers
-    , lens
     , mtl
     , react-tui
     , stm
@@ -71,9 +71,9 @@ test-suite react-tui-test
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      async
+    , base >=4.7 && <5
     , containers
-    , lens
     , mtl
     , react-tui
     , stm

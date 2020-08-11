@@ -24,10 +24,10 @@ dependencies:
 - vty
 - text
 - containers
-- lens
 - mtl
 - typerep-map
 - stm
+- async
 
 library:
   source-dirs: src
