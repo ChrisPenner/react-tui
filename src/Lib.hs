@@ -77,13 +77,15 @@ registerCleanup m = do
 mountComponent ::  Component props -> ComponentID -> props -> React Vty.Image
 mountComponent (Component {renderComponent}) componentID props = do
     parentCompID <- getCompID
-    (a, cleanup) <- adjustContext (addCompID componentID) $ shadowEffectNames $  trackCleanup $ shadowStateMap $ renderComponent props
+    (a, cleanup) <- adjustContext (addCompID componentID) $ shadowEffectNames $ trackSubComponents $ trackCleanup $ shadowStateMap $ renderComponent props
     registerComponent (addCompID componentID parentCompID) cleanup
     return a
   where
       shadowStateMap :: React a -> React a
       shadowStateMap child = do
         (readStateMap, updater) <- useState' (ShadowedState mempty)
+        -- Clear component state on unmount
+        useMemo () $ registerCleanup $ (useSynchronous . atomically $ updater False (const $ ShadowedState mempty))
         ShadowedState stateMap <- readStateMap
         withContext (StateMap (return stateMap, \b f -> coerce updater b f)) $ child
       shadowEffectNames :: React a -> React a
@@ -99,23 +101,15 @@ mountComponent (Component {renderComponent}) componentID props = do
       -- State inside this function just doesn't work and I have no clue why.
       trackSubComponents :: React a -> React a
       trackSubComponents m = do
-          (readCompMap, updateCompMap) <- useNonRenderingStateVar (mempty :: M.Map CompID (React ()))
-          updateCompMap (const $ M.singleton (CompID ["TEST"]) $ pure ())
-          prevCompMap <- readCompMap
-          debug ("prevCompMap", M.keys prevCompMap)
+          compMapVar <- useMemo () . useSynchronous $ newTVarIO (mempty :: M.Map CompID (React ()))
+          prevCompMap <- useSynchronous $ readTVarIO compMapVar
+          useSynchronous . atomically . writeTVar compMapVar $ mempty
           a <- withContext (RegisterComponent (\compID cleanup -> do
-              debug ("Registering", compID)
-              -- updateCompMap (M.alter (addCleanup cleanup) compID)
-              updateCompMap (const $ M.singleton (CompID ["TEST"]) $ pure ())
-
-                                              )) $ m
-          newCompMap <- readCompMap
-          debug ("newCompMap", M.keys prevCompMap)
+              useSynchronous . atomically $ modifyTVar' compMapVar (M.alter (addCleanup cleanup) compID))) $ m
+          newCompMap <- useSynchronous . readTVarIO $ compMapVar
           let unmountedComponents = M.difference prevCompMap newCompMap
-          debug $ M.keys unmountedComponents
           -- Run any relevant cleanup
           fold $ unmountedComponents
-          updateCompMap (const newCompMap)
           return a
       addCleanup :: React () -> Maybe (React ()) -> Maybe (React ())
       addCleanup cleanup Nothing = Just cleanup
@@ -270,16 +264,16 @@ useEffect sentinel effect = do
     runEffect = do
         debug "Registering Cancel"
         handle <- useSynchronous $ async (void effect)
-        registerCleanup (debug "Cancelling! ">> useSynchronous (cancel handle))
+        registerCleanup (debug "Cancelling! ">> useSynchronous (cancel handle) >> debug "Thread killed")
 
 newtype EventGetter = EventGetter (IO Vty.Event)
 useTermEvent ::  (Vty.Event -> IO ()) -> React ()
 useTermEvent handler = do
-    useContext >>= \case
-      Just (EventGetter getEvent) ->
-        useEffect () $ do
-            forever $ getEvent >>= handler
-      Nothing -> return ()
+    mEventGetter <- useContext
+    useEffect () $ do
+        case mEventGetter of
+            Just (EventGetter getEvent) -> forever $ getEvent >>= handler >> debugIO (CompID ["Events"]) "Tick"
+            Nothing -> return ()
 
 newtype Shutdown = Shutdown (IO ())
 

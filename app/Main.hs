@@ -37,10 +37,9 @@ timer :: Component ()
 timer = Component $ \() -> do
     -- debug "rendered timer"
     (counter, setCounter) <- useState (0 :: Int)
-    lstKey <- if counter < 5 then mountComponent lastKey "asldkj" ()
+    lstKey <- if counter < 5 || counter > 10 then mountComponent lastKey "asldkj" ()
                     else return mempty
     useEffect () $ do
-        print "Kicking off timer"
         forever $ do
             threadDelay 1000000
             setCounter succ
