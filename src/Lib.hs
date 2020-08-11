@@ -34,7 +34,7 @@ import qualified Data.Set as S
 -- Re-render cached on context.
 -- Component lifecycle & component cleanup (not sure how this works in Haskell)
 
-type SMap = TRM.TypeRepMap (M.Map (String, String))
+type SMap = TRM.TypeRepMap (M.Map (CompID, String))
 type EffectName = String
 type ComponentID = String
 
@@ -51,9 +51,11 @@ newtype Component props =
     Component { renderComponent :: props -> React Vty.Image
               }
 
+newtype RegisterComponent = RegisterComponent (CompID -> React () -> React ())
+newtype RegisterCleanup = RegisterCleanup (React () -> React ())
 mountComponent ::  Component props -> ComponentID -> props -> React Vty.Image
 mountComponent (Component {renderComponent}) componentID props = do
-    withContext (CompID componentID) $ shadowEffectNames $ shadowStateMap $ renderComponent props
+    adjustContext (addCompID componentID) $ shadowEffectNames $ shadowStateMap $ renderComponent props
   where
       shadowStateMap :: React a -> React a
       shadowStateMap child = do
@@ -62,7 +64,13 @@ mountComponent (Component {renderComponent}) componentID props = do
       shadowEffectNames :: React a -> React a
       shadowEffectNames (React m) =
           React . lift $ flip evalStateT 0 m
-
+      trackSubComponents :: React a -> React a
+      trackSubComponents m = do
+          (compMap, updateCompMap) <- useNonRenderingState (mempty :: M.Map CompID (React ()))
+          withContext (RegisterComponent (\compID cleanup -> updateCompMap (M.alter (addCleanup cleanup) compID ))) $ m
+      addCleanup :: React () -> Maybe (React ()) -> Maybe (React ())
+      addCleanup cleanup Nothing = Just cleanup
+      addCleanup cleanup (Just existing) = Just (existing >> cleanup)
 
 cached :: (Typeable props, Eq props) => ComponentID -> Component props -> Component props
 cached componentName comp = Component $ \props -> do
@@ -110,6 +118,9 @@ newtype StateMap = StateMap (STM SMap, Bool -> (SMap -> SMap) -> STM ())
 withContext :: Typeable ctx => ctx -> React a -> React a
 withContext ctx = local (TM.insert ctx)
 
+adjustContext :: Typeable ctx => (ctx -> ctx) -> React a -> React a
+adjustContext f = local (TM.adjust f)
+
 newtype RegisterContextTracking = RegisterContextTracking (TypeRep -> React ())
 useContext :: forall a. Typeable a => React (Maybe a)
 useContext = do
@@ -126,8 +137,11 @@ useContextUntraced = do
 useContextWithDefault :: Typeable a => a -> React a
 useContextWithDefault def = fromMaybe def <$> useContext
 
-newtype CompID = CompID String
-  deriving newtype Typeable
+newtype CompID = CompID [String]
+  deriving newtype (Typeable, Eq, Ord, Show)
+
+addCompID :: String -> CompID -> CompID
+addCompID c (CompID cs) = CompID (c:cs)
 
 alterTRM :: forall a f. Typeable a => (Maybe (f a) -> Maybe (f a)) -> TRM.TypeRepMap f -> TRM.TypeRepMap f
 alterTRM f trm =
@@ -140,7 +154,7 @@ getStateToken = show <$> React (modify succ *> get)
 
 useState' :: forall s. Typeable s => s -> React (s, Bool -> (s -> s) -> STM ())
 useState' def = do
-    CompID cid <- useContextWithDefault (CompID "root")
+    cid <- useContextWithDefault (CompID ["root"])
     stateToken <- (cid,) <$> getStateToken
     (StateMap (getStates, updater)) <- fromJust <$> useContextUntraced
     smap <- React (liftIO (TRM.lookup <$> atomically getStates))
@@ -149,7 +163,7 @@ useState' def = do
                 M.lookup stateToken sm
     return (s, \rerender f -> updater rerender $ updateTM stateToken $ f)
   where
-    updateTM :: (String, String) -> (s -> s) -> (SMap -> SMap)
+    updateTM :: (CompID, String) -> (s -> s) -> (SMap -> SMap)
     updateTM token f typemap = do
         flip alterTRM typemap $ \case
           Nothing -> Just $ (M.singleton token $ f def)
@@ -180,7 +194,7 @@ useMemo sentinel action = do
            return output
 
 -- Effect should return a "cleanup" function to deregister the effect.
-useEffect :: forall sentinel a. (Typeable sentinel, Eq sentinel) =>  sentinel -> IO (IO ()) -> React ()
+useEffect :: forall sentinel a. (Typeable sentinel, Eq sentinel) =>  sentinel -> IO () -> React ()
 useEffect sentinel effect = do
     useMemo sentinel $ do runEffect
   where
@@ -223,7 +237,7 @@ render (Component renderComponent) props = do
              . withContext (StateMap (readTVar stateMapVar, \rerender f -> writeTQueue stateQueue $ (rerender, f)))
              .  withContext (EventGetter $ Vty.nextEvent vty)
              .  withContext (Shutdown . atomically $ writeTVar quitVar True)
-             .  withContext (CompID "root")
+             .  withContext (CompID ["root"])
              $ (renderComponent props)
         Vty.update vty (Vty.picForImage pic)
         appState <- fix $ \recurse -> do
