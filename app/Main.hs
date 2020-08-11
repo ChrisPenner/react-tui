@@ -35,17 +35,16 @@ simpleStateTracker = Component (const $ useState (0 :: Int) *> renderText "yo")
 
 timer :: Component ()
 timer = Component $ \() -> do
-    (counter', setCounter') <- useState (0 :: Int)
-    if counter' < 4 then void $ debug "Triggered" *> mountComponent simpleStateTracker "asldkj" ()
-                    else return ()
+    -- debug "rendered timer"
     (counter, setCounter) <- useState (0 :: Int)
+    lstKey <- if counter < 5 then mountComponent lastKey "asldkj" ()
+                    else return mempty
     useEffect () $ do
         print "Kicking off timer"
         forever $ do
             threadDelay 1000000
             setCounter succ
-            setCounter' succ
-    renderText $ "Counter: " <> TL.pack (show counter)
+    (lstKey Vty.<->) <$> (renderText $ "Counter: " <> TL.pack (show counter))
 
 favNumber :: Component ()
 favNumber = Component $ \() -> do
@@ -53,7 +52,8 @@ favNumber = Component $ \() -> do
     renderText $ "Favourite Number: " <> TL.pack (show favNumber)
 
 lastKey :: Component ()
-lastKey = cached "last" $ Component $ \() -> do
+lastKey = Component $ \() -> do
+    -- debug "rendered lastKey"
     (keypress, setKeypress) <- useState "No events"
     shutdown <- useShutdown
     useTermEvent $ \case
@@ -76,9 +76,9 @@ boxed cmp = Component $ \props -> do
 something :: Component ()
 something = Component $ \_ -> do
   i1 <- mountComponent timer "timer" ()
-  i2 <- mountComponent favNumber "fav-number" ()
+  -- i2 <- mountComponent favNumber "fav-number" ()
   i3 <- mountComponent lastKey "last-key" ()
-  return (i1 Vty.<-> i2 Vty.<-> i3)
+  return (i1 Vty.<-> i3)
 
 main :: IO ()
-main = render something ()
+main = render timer ()

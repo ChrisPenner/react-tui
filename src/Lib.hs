@@ -31,6 +31,9 @@ import Data.Bifunctor
 import qualified Data.Set as S
 import Data.Foldable
 import Data.Monoid
+import Data.Traversable
+import Control.Concurrent.Async
+import qualified Data.List as L
 
 -- ✅ Scope component's state
 -- ✅ Higher order component: wrapping components
@@ -42,9 +45,11 @@ type EffectName = String
 type ComponentID = String
 
 debug :: Show a => a -> React ()
-debug = useSynchronous . debugIO
-debugIO :: Show a => a -> IO ()
-debugIO msg = appendFile "log" (show msg <> "\n")
+debug msg = do
+    compID <- getCompID
+    useSynchronous $ debugIO compID msg
+debugIO :: Show a => CompID -> a -> IO ()
+debugIO compID msg = appendFile "log" (show compID <> ": " <> show msg <> "\n")
 
 newtype React a =
     React { runReact :: StateT Int (ReaderT TM.TMap IO) a
@@ -55,11 +60,26 @@ newtype Component props =
     Component { renderComponent :: props -> React Vty.Image
               }
 
-newtype RegisterComponent = RegisterComponent (React () -> React ())
+newtype RegisterComponent = RegisterComponent (CompID -> React () -> React ())
+registerComponent :: CompID -> React () -> React ()
+registerComponent compID cleanup = do
+    useContext >>= \case
+      Nothing -> return ()
+      Just (RegisterComponent f) -> f compID cleanup
+
 newtype RegisterCleanup = RegisterCleanup (React () -> React ())
+registerCleanup :: React () -> React ()
+registerCleanup m = do
+    useContext >>= \case
+      Nothing -> return ()
+      Just (RegisterCleanup f) -> f m
+
 mountComponent ::  Component props -> ComponentID -> props -> React Vty.Image
 mountComponent (Component {renderComponent}) componentID props = do
-    adjustContext (addCompID componentID) $ shadowEffectNames $ shadowStateMap $ renderComponent props
+    parentCompID <- getCompID
+    (a, cleanup) <- adjustContext (addCompID componentID) $ shadowEffectNames $  trackCleanup $ shadowStateMap $ renderComponent props
+    registerComponent (addCompID componentID parentCompID) cleanup
+    return a
   where
       shadowStateMap :: React a -> React a
       shadowStateMap child = do
@@ -69,18 +89,28 @@ mountComponent (Component {renderComponent}) componentID props = do
       shadowEffectNames :: React a -> React a
       shadowEffectNames (React m) =
           React . lift $ flip evalStateT 0 m
-      -- trackCleanup :: React a -> React (a, React ())
-      -- trackCleanup m = do
+      trackCleanup :: React a -> React (a, React ())
+      trackCleanup action = do
+          (readCleanup, setCleanup) <- useNonRenderingStateVar mempty
+          withContext (RegisterCleanup (\m -> setCleanup (>> m))) $ do
+              a <- action
+              (a,) <$> readCleanup
 
-
+      -- State inside this function just doesn't work and I have no clue why.
       trackSubComponents :: React a -> React a
       trackSubComponents m = do
           (readCompMap, updateCompMap) <- useNonRenderingStateVar (mempty :: M.Map CompID (React ()))
+          updateCompMap (const $ M.singleton (CompID ["TEST"]) $ pure ())
           prevCompMap <- readCompMap
-          a <- withContext (RegisterComponent (\cleanup -> do
-              compID <- getCompID
-              updateCompMap (M.alter (addCleanup cleanup) compID ))) $ m
+          debug ("prevCompMap", M.keys prevCompMap)
+          a <- withContext (RegisterComponent (\compID cleanup -> do
+              debug ("Registering", compID)
+              -- updateCompMap (M.alter (addCleanup cleanup) compID)
+              updateCompMap (const $ M.singleton (CompID ["TEST"]) $ pure ())
+
+                                              )) $ m
           newCompMap <- readCompMap
+          debug ("newCompMap", M.keys prevCompMap)
           let unmountedComponents = M.difference prevCompMap newCompMap
           debug $ M.keys unmountedComponents
           -- Run any relevant cleanup
@@ -91,10 +121,11 @@ mountComponent (Component {renderComponent}) componentID props = do
       addCleanup cleanup Nothing = Just cleanup
       addCleanup cleanup (Just existing) = Just (existing >> cleanup)
 
-cached :: (Typeable props, Eq props) => ComponentID -> Component props -> Component props
-cached componentName comp = Component $ \props -> do
-    useCache props $ do
-        mountComponent comp (componentName <> "cached") props
+-- This is broken right now
+-- cached :: (Typeable props, Eq props) => ComponentID -> Component props -> Component props
+-- cached componentName comp = Component $ \props -> do
+--     useCache props $ do
+--         mountComponent comp (componentName <> "cached") props
 
 -- Only for super-quick setup methods, don't expose this.
 -- newtype Once a = Once (Maybe a)
@@ -164,7 +195,10 @@ useContextWithDefault :: Typeable a => a -> React a
 useContextWithDefault def = fromMaybe def <$> useContext
 
 newtype CompID = CompID [String]
-  deriving newtype (Typeable, Eq, Ord, Show)
+  deriving newtype (Typeable, Eq, Ord)
+
+instance Show CompID where
+  show (CompID path) = L.intercalate "/" $ reverse path
 
 addCompID :: String -> CompID -> CompID
 addCompID c (CompID cs) = CompID (c:cs)
@@ -234,8 +268,9 @@ useEffect sentinel effect = do
     useMemo sentinel $ do runEffect
   where
     runEffect = do
-        void . useSynchronous $ forkIO (void effect)
-        -- RegisterComponent registerer <- fromJust <$> useContext
+        debug "Registering Cancel"
+        handle <- useSynchronous $ async (void effect)
+        registerCleanup (debug "Cancelling! ">> useSynchronous (cancel handle))
 
 newtype EventGetter = EventGetter (IO Vty.Event)
 useTermEvent ::  (Vty.Event -> IO ()) -> React ()
@@ -262,7 +297,7 @@ newtype ShadowedState = ShadowedState SMap
 data AppState = ReRender | AwaitChange | ShutdownApp
   deriving Eq
 render ::  Component props -> props -> IO ()
-render (Component renderComponent) props = do
+render comp props = do
     vty <- Vty.mkVty Vty.defaultConfig
     (stateMapVar :: TVar SMap) <- newTVarIO mempty
     stateQueue <- newTQueueIO
@@ -274,17 +309,19 @@ render (Component renderComponent) props = do
              . withContext (StateMap (readTVar stateMapVar, \rerender f -> writeTQueue stateQueue $ (rerender, f)))
              .  withContext (EventGetter $ Vty.nextEvent vty)
              .  withContext (Shutdown . atomically $ writeTVar quitVar True)
-             .  withContext (CompID ["root"])
-             $ (renderComponent props)
+             $ (mountComponent comp "root" props)
         Vty.update vty (Vty.picForImage pic)
         appState <- fix $ \recurse -> do
             appState <- atomically $ do
                 let checkQuit = readTVar quitVar >>= check >> return ShutdownApp
                 orElse checkQuit $ do
-                    (rerender, f) <- readTQueue stateQueue
-                    modifyTVar' stateMapVar f
-                    if rerender then return ReRender
-                                else return AwaitChange
+                        updates <- flushTQueue stateQueue
+                        when (null updates) retry
+                        rerenders <- for updates $ \(rerender, f) -> do
+                                            modifyTVar' stateMapVar f
+                                            return rerender
+                        if or rerenders then return ReRender
+                                        else return AwaitChange
             if appState == AwaitChange
                then recurse
                else return appState
