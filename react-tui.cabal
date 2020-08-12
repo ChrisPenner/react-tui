@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 2333ab6e77efbdb225f3b6c2c00b1dd072504af71005469af5bed7c24362a584
+-- hash: 4afd2ceb53e336ea27ca157df584e78a93f09e8f9f7b188cc6797c91e6a1f5d1
 
 name:           react-tui
 version:        0.1.0.0
@@ -28,6 +28,10 @@ source-repository head
 library
   exposed-modules:
       Lib
+      React
+      React.Component
+      React.CoreHooks
+      React.Vty
   other-modules:
       Paths_react_tui
   hs-source-dirs:

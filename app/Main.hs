@@ -76,8 +76,18 @@ something :: Component ()
 something = Component $ \_ -> do
   i1 <- mountComponent timer "timer" ()
   -- i2 <- mountComponent favNumber "fav-number" ()
-  i3 <- mountComponent lastKey "last-key" ()
-  return (i1 Vty.<-> i3)
+  i2 <- mountComponent lastKey "last-key" ()
+  i3 <- mountComponent lastKey "laster-key" ()
+  return (i1 Vty.<-> i2 Vty.<-> i3)
+
+-- data Selected = A | B | C
+--   deriving (Eq, Ord)
+-- routeFocus :: Component ()
+-- routeFocus = Component $ \_ -> do
+--     (selected, setSelected) <- useState A
+--     case selected of
+
+
 
 main :: IO ()
-main = render timer ()
+main = render something ()
