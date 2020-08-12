@@ -21,6 +21,7 @@ useMemo,
 useEffect,
 debug,
 debugIO,
+useExit,
 
 -- For plugin authors
 registerCleanup,
@@ -45,6 +46,8 @@ import qualified Data.TMap as TM
 import Data.Typeable
 import Data.Maybe
 import qualified Data.Text.Lazy as TL
+import qualified Data.Text.IO as T
+import qualified Data.Text as T
 import Control.Concurrent.STM.TVar
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent
@@ -67,12 +70,18 @@ import React.Component
 useSynchronous :: IO a -> React a
 useSynchronous m = React (liftIO m)
 
+useExit :: React (IO ())
+useExit = do
+    StateMap (_, updater) <- fromJust <$> useContext
+    return (atomically $ updater ShutdownApp id)
+
 debug :: Show a => a -> React ()
 debug msg = do
     compID <- getCompID
-    useSynchronous $ debugIO compID msg
-debugIO :: Show a => CompID -> a -> IO ()
-debugIO compID msg = appendFile "log" (show compID <> ": " <> show msg <> "\n")
+    useSynchronous $ T.appendFile "log" (T.pack $ show compID <> ": " <> show msg <> "\n")
+
+debugIO :: Show a => a -> IO ()
+debugIO msg = T.appendFile "log" (T.pack $ show msg <> "\n")
 
 
 alterTRM :: forall a f. Typeable a => (Maybe (f a) -> Maybe (f a)) -> TRM.TypeRepMap f -> TRM.TypeRepMap f

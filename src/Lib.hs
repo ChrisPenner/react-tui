@@ -63,7 +63,7 @@ mountComponent (Component {renderComponent}) componentID props = do
       shadowStateMap child = do
         (readStateMap, updater) <- useState' (ShadowedState mempty)
         -- Clear component state on unmount
-        useMemo () $ registerCleanup $ (useSynchronous . atomically $ updater False (const $ ShadowedState mempty))
+        useMemo () $ registerCleanup $ (useSynchronous . atomically $ updater AwaitChange (const $ ShadowedState mempty))
         ShadowedState stateMap <- readStateMap
         withContext (StateMap (return stateMap, \b f -> coerce updater b f)) $ child
       shadowEffectNames :: React a -> React a

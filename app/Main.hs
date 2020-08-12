@@ -12,6 +12,11 @@ import Control.Concurrent
 import Control.Monad
 import qualified Data.List as L
 import Control.Monad.State
+import React.Component
+import React
+import React.App
+import React.CoreHooks
+import React.Vty
 
 import GHC.Clock
 
@@ -54,7 +59,7 @@ lastKey :: Component ()
 lastKey = Component $ \() -> do
     -- debug "rendered lastKey"
     (keypress, setKeypress) <- useState "No events"
-    shutdown <- useShutdown
+    shutdown <- useExit
     useTermEvent $ \case
       Vty.EvKey (Vty.KChar 'q') _ -> shutdown
       Vty.EvKey (Vty.KChar 'c') _ -> shutdown
@@ -87,7 +92,5 @@ something = Component $ \_ -> do
 --     (selected, setSelected) <- useState A
 --     case selected of
 
-
-
 main :: IO ()
-main = render something ()
+main = runVty (mountComponent something "root" ())

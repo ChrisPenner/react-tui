@@ -8,6 +8,7 @@ import Graphics.Vty as Vty
 import Control.Concurrent.STM.TChan
 import Control.Concurrent.STM
 import Control.Monad
+import Control.Concurrent.Async
 import React.App
 
 newtype EventGetter = EventGetter (TChan Vty.Event)
@@ -15,6 +16,8 @@ useTermEvent ::  (Vty.Event -> IO ()) -> React ()
 useTermEvent handler = do
     mEventGetter <- useContext
     useEffect () $ do
+        -- debugIO "Kicking off term event"
+        print "kicking off"
         case mEventGetter of
             Just (EventGetter eventChan) -> do
                 localChan <- atomically $ dupTChan eventChan
@@ -28,10 +31,9 @@ useShutdown = do
           return shutdown
       Nothing -> return (return ())
 
-withEvents :: Vty.Vty -> React a -> React a
-withEvents vty m = do
-    eventChan <- useOnce . useSynchronous $ newBroadcastTChanIO
-    withContext (EventGetter eventChan) m
+withEvents :: TChan Vty.Event -> React a -> React a
+withEvents chan m = do
+    withContext (EventGetter chan) m
 
 newtype Shutdown = Shutdown (IO ())
 
@@ -42,5 +44,7 @@ withShutdown vty m = do
 runVty :: React Vty.Image -> IO ()
 runVty r = do
     vty <- Vty.mkVty Vty.defaultConfig
-    run ((withEvents vty .  withShutdown vty) r) (Vty.update vty . Vty.picForImage)
+    eventChan <- newBroadcastTChanIO
+    withAsync (forever $ Vty.nextEvent vty >>= atomically . writeTChan eventChan) $ const $ do
+        run ((withEvents eventChan .  withShutdown vty) r) (Vty.update vty . Vty.picForImage)
     Vty.shutdown vty
