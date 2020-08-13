@@ -17,6 +17,8 @@ import React
 import React.App
 import React.CoreHooks
 import React.Vty
+import Data.Text.IO as T
+import Data.Text as T
 
 import GHC.Clock
 
@@ -94,4 +96,4 @@ something = Component $ \_ -> do
 --     case selected of
 
 main :: IO ()
-main = runVty (mountComponent something "something" ())
+main = runVty (withDebugger (\compID msg -> T.appendFile "log" $ T.pack (compID <> ": "<> msg <> "\n")) $ mountComponent something "something" ())

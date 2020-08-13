@@ -19,8 +19,9 @@ useState,
 useOnce,
 useMemo,
 useEffect,
-debug,
-debugIO,
+useDebug,
+useDebugIO,
+withDebugger,
 useExit,
 
 -- For plugin authors
@@ -75,14 +76,21 @@ useExit = do
     StateMap (_, updater) <- fromJust <$> useContext
     return (atomically $ updater ShutdownApp id)
 
-debug :: Show a => a -> React ()
-debug msg = do
+newtype Debugger = Debugger (CompID -> String -> IO ())
+useDebug :: Show a => a -> React ()
+useDebug msg = do
+    debug <- useDebugIO
+    useSynchronous $ debug msg
+
+useDebugIO :: Show a => React (a -> IO ())
+useDebugIO = do
+    Debugger debug <- useContextWithDefault (Debugger (\_ _ -> return ()))
     compID <- getCompID
-    useSynchronous $ T.appendFile "log" (T.pack $ show compID <> ": " <> show msg <> "\n")
+    return (debug compID . show)
 
-debugIO :: Show a => a -> IO ()
-debugIO msg = T.appendFile "log" (T.pack $ show msg <> "\n")
-
+withDebugger :: (String -> String -> IO ()) -> React a -> React a
+withDebugger handler = do
+    withContext (Debugger (\compID msg -> handler (show compID) msg))
 
 alterTRM :: forall a f. Typeable a => (Maybe (f a) -> Maybe (f a)) -> TRM.TypeRepMap f -> TRM.TypeRepMap f
 alterTRM f trm =
@@ -171,9 +179,9 @@ useEffect sentinel effect = do
     useMemo sentinel $ do runEffect
   where
     runEffect = do
-        debug "Registering Cancel"
+        useDebug "Registering Cancel"
         handle <- useSynchronous $ async (void effect)
-        registerCleanup (debug "Cancelling! ">> useSynchronous (cancel handle) >> debug "Thread killed")
+        registerCleanup (useSynchronous (cancel handle) >> useDebug "Thread killed")
 
 getStateToken :: React String
 getStateToken = show <$> React (modify succ *> get)

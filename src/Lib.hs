@@ -89,9 +89,9 @@ mountComponent (Component {renderComponent}) componentID props = do
           let unmountedComponents = M.difference prevCompMap newCompMap
           let mountedComponents = M.difference newCompMap prevCompMap
           when (not . null $ M.keys unmountedComponents)
-            $ debug ("Unmounting", M.keys unmountedComponents)
+            $ useDebug ("Unmounting", M.keys unmountedComponents)
           when (not . null $ M.keys mountedComponents)
-            $ debug ("Mounting", M.keys mountedComponents)
+            $ useDebug ("Mounting", M.keys mountedComponents)
           -- Run any relevant cleanup
           fold $ unmountedComponents
           return a
