@@ -42,6 +42,7 @@ timer :: Component ()
 timer = Component $ \() -> do
     -- debug "rendered timer"
     (counter, setCounter) <- useState (0 :: Int)
+    -- lstKey <- mountComponent lastKey "asldkj" ()
     lstKey <- if counter < 5 || counter > 10 then mountComponent lastKey "asldkj" ()
                     else return mempty
     useEffect () $ do
@@ -93,4 +94,4 @@ something = Component $ \_ -> do
 --     case selected of
 
 main :: IO ()
-main = runVty (mountComponent something "root" ())
+main = runVty (mountComponent something "something" ())

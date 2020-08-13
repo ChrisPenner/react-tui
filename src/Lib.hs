@@ -55,8 +55,9 @@ registerComponent compID cleanup = do
 mountComponent ::  Component props -> String -> props -> React Vty.Image
 mountComponent (Component {renderComponent}) componentID props = do
     parentCompID <- getCompID
-    (a, cleanup) <- adjustContext (addCompID componentID) $ shadowEffectNames $ trackSubComponents $ trackCleanup $ shadowStateMap $ renderComponent props
-    registerComponent (addCompID componentID parentCompID) cleanup
+    let newCompID = addCompID componentID parentCompID
+    (a, cleanup) <- withContext newCompID $ shadowEffectNames $ trackCleanup $ trackSubComponents $ shadowStateMap $ renderComponent props
+    registerComponent (newCompID) cleanup
     return a
   where
       shadowStateMap :: React a -> React a
@@ -79,13 +80,18 @@ mountComponent (Component {renderComponent}) componentID props = do
       -- State inside this function just doesn't work and I have no clue why.
       trackSubComponents :: React a -> React a
       trackSubComponents m = do
-          compMapVar <- useMemo () . useSynchronous $ newTVarIO (mempty :: M.Map CompID (React ()))
+          compMapVar <- useOnce . useSynchronous $ newTVarIO (mempty :: M.Map CompID (React ()))
           prevCompMap <- useSynchronous $ readTVarIO compMapVar
           useSynchronous . atomically . writeTVar compMapVar $ mempty
           a <- withContext (RegisterComponent (\compID cleanup -> do
               useSynchronous . atomically $ modifyTVar' compMapVar (M.alter (addCleanup cleanup) compID))) $ m
           newCompMap <- useSynchronous . readTVarIO $ compMapVar
           let unmountedComponents = M.difference prevCompMap newCompMap
+          let mountedComponents = M.difference newCompMap prevCompMap
+          when (not . null $ M.keys unmountedComponents)
+            $ debug ("Unmounting", M.keys unmountedComponents)
+          when (not . null $ M.keys mountedComponents)
+            $ debug ("Mounting", M.keys mountedComponents)
           -- Run any relevant cleanup
           fold $ unmountedComponents
           return a
