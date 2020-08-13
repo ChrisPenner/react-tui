@@ -10,14 +10,15 @@ import Control.Concurrent.STM
 import Control.Monad
 import Control.Concurrent.Async
 import React.App
+import Data.Typeable
 
 newtype EventGetter = EventGetter (TChan Vty.Event)
-useTermEvent ::  (Vty.Event -> IO ()) -> React ()
-useTermEvent handler = do
+useTermEvent :: (Typeable sentinel, Eq sentinel) => sentinel -> (Vty.Event -> IO ()) -> React ()
+useTermEvent sentinel handler = do
     mEventGetter <- useContext
-    useEffect () $ do
-        -- debugIO "Kicking off term event"
-        print "kicking off"
+    debugIO <- useDebugIO 
+    useEffect sentinel $ do
+        debugIO "Kicking off term event"
         case mEventGetter of
             Just (EventGetter eventChan) -> do
                 localChan <- atomically $ dupTChan eventChan

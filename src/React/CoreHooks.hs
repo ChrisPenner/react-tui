@@ -176,12 +176,20 @@ useMemo sentinel action = do
 -- Effect should return a "cleanup" function to deregister the effect.
 useEffect :: forall sentinel a. (Typeable sentinel, Eq sentinel) =>  sentinel -> IO () -> React ()
 useEffect sentinel effect = do
-    useMemo sentinel $ do runEffect
+    (prevCleanup, setCleanup) <- useNonRenderingState @(React ()) (return ())
+    lastSentinel <- useLast sentinel
+    case lastSentinel of
+        Just s | s == sentinel -> return ()
+        _ -> do
+            prevCleanup
+            cleanup <- runEffect
+            registerCleanup cleanup
+            setCleanup (const cleanup)
   where
     runEffect = do
         useDebug "Registering Cancel"
         handle <- useSynchronous $ async (void effect)
-        registerCleanup (useSynchronous (cancel handle) >> useDebug "Thread killed")
+        return $ useSynchronous (cancel handle) >> useDebug "Thread killed"
 
 getStateToken :: React String
 getStateToken = show <$> React (modify succ *> get)

@@ -19,6 +19,9 @@ import React.CoreHooks
 import React.Vty
 import Data.Text.IO as T
 import Data.Text as T
+import Control.Concurrent.STM.TQueue
+import Control.Concurrent.STM
+import Control.Concurrent.Async
 
 import GHC.Clock
 
@@ -45,7 +48,7 @@ timer = Component $ \() -> do
     -- debug "rendered timer"
     (counter, setCounter) <- useState (0 :: Int)
     -- lstKey <- mountComponent lastKey "asldkj" ()
-    lstKey <- if counter < 5 || counter > 10 then mountComponent lastKey "asldkj" ()
+    lstKey <- if counter < 5 || counter > 10 then mountComponent lastKey "asldkj" (HasKeyboardFocus (counter `mod` 2 == 0), return ())
                     else return mempty
     useEffect () $ do
         forever $ do
@@ -58,17 +61,22 @@ favNumber = Component $ \() -> do
     (favNumber, _) <- useState (42 :: Int)
     renderText $ "Favourite Number: " <> TL.pack (show favNumber)
 
-lastKey :: Component ()
-lastKey = Component $ \() -> do
-    -- debug "rendered lastKey"
+newtype HasKeyboardFocus = HasKeyboardFocus Bool
+lastKey :: Component (HasKeyboardFocus, IO ())
+lastKey = Component $ \(HasKeyboardFocus hasKeyboardFocus, toggle) -> do
     (keypress, setKeypress) <- useState "No events"
     shutdown <- useExit
-    useTermEvent $ \case
-      Vty.EvKey (Vty.KChar 'q') _ -> shutdown
-      Vty.EvKey (Vty.KChar 'c') _ -> shutdown
-      Vty.EvKey key _ -> do
-          setKeypress (const $ TL.pack $ show key)
-      _ -> return ()
+    debugIO <- useDebugIO
+    useTermEvent hasKeyboardFocus $ \evt -> do
+      debugIO $ ("hasKeyboard", hasKeyboardFocus)
+      case evt of
+        Vty.EvKey (Vty.KChar 'q') _ -> shutdown
+        Vty.EvKey (Vty.KChar 'c') _ -> shutdown
+        Vty.EvKey key _ -> do
+            when hasKeyboardFocus $ do
+                toggle
+                setKeypress (const $ TL.pack $ show key)
+        _ -> return ()
     renderText $ "Last Keypress: " <> keypress
 
 boxed :: Component a -> Component a
@@ -80,13 +88,13 @@ boxed cmp = Component $ \props -> do
     let vertBorder = vertCat $ L.replicate (h + 2) (Vty.text defAttr "#")
     return $ vertBorder Vty.<|> (horBorder <-> img <-> horBorder) Vty.<|> vertBorder
 
-something :: Component ()
-something = Component $ \_ -> do
-  i1 <- mountComponent timer "timer" ()
-  -- i2 <- mountComponent favNumber "fav-number" ()
-  i2 <- mountComponent lastKey "last-key" ()
-  i3 <- mountComponent lastKey "laster-key" ()
-  return (i1 Vty.<-> i2 Vty.<-> i3)
+flipflopper :: Component ()
+flipflopper = Component $ \_ -> do
+  (flipflop, setFlipFlop) <- useState False
+  useDebug flipflop
+  i2 <- mountComponent lastKey "flip" (HasKeyboardFocus flipflop, setFlipFlop not)
+  i3 <- mountComponent lastKey "flop" (HasKeyboardFocus (not flipflop), setFlipFlop not)
+  return ( i2 Vty.<-> i3)
 
 -- data Selected = A | B | C
 --   deriving (Eq, Ord)
@@ -95,5 +103,12 @@ something = Component $ \_ -> do
 --     (selected, setSelected) <- useState A
 --     case selected of
 
+writeLogs :: TQueue T.Text -> String -> String -> IO ()
+writeLogs queue compID msg = do
+    atomically $ writeTQueue queue $ T.pack (compID <> ": "<> msg <> "\n")
+
 main :: IO ()
-main = runVty (withDebugger (\compID msg -> T.appendFile "log" $ T.pack (compID <> ": "<> msg <> "\n")) $ mountComponent something "something" ())
+main = do
+    debugLogsVar <- newTQueueIO
+    withAsync (forever $ atomically (readTQueue debugLogsVar) >>= T.appendFile "log") $ const $ do
+        runVty (withDebugger (writeLogs debugLogsVar) $ mountComponent something "something" ())
