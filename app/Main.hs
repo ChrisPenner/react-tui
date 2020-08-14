@@ -14,6 +14,7 @@ import qualified Data.List as L
 import Control.Monad.State
 import React.Component
 import React
+import React.Editor
 import React.App
 import React.CoreHooks
 import React.Vty
@@ -99,4 +100,4 @@ main :: IO ()
 main = do
     debugLogsVar <- newTQueueIO
     withAsync (forever $ atomically (readTQueue debugLogsVar) >>= T.appendFile "log") $ const $ do
-        runVty (withDebugger (writeLogs debugLogsVar) $ flipflopper "something" ())
+        runVty (withDebugger (writeLogs debugLogsVar) . fmap snd $ editor "editor" defaultEditorSettings)

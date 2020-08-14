@@ -28,8 +28,8 @@ useTermEvent sentinel handler = do
 useShutdown :: React (IO ())
 useShutdown = do
     useContext >>= \case
-      Just (Shutdown shutdown) ->
-          return shutdown
+      Just (Shutdown shutdown) -> do
+        return shutdown
       Nothing -> return (return ())
 
 withEvents :: TChan Vty.Event -> React a -> React a
@@ -40,6 +40,10 @@ newtype Shutdown = Shutdown (IO ())
 
 withShutdown :: Vty.Vty -> React a -> React a
 withShutdown vty m = do
+    exit <- useExit
+    useTermEvent () $ \case
+        Vty.EvKey (Vty.KChar 'c') _ -> exit
+        _ -> return ()
     withContext (Shutdown (Vty.shutdown vty)) m
 
 runVty :: React Vty.Image -> IO ()
