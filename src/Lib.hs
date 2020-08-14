@@ -41,19 +41,22 @@ import React.Vty
 
 -- ✅ Scope component's state
 -- ✅ Higher order component: wrapping components
--- Re-render cached on context.
--- Component lifecycle & component cleanup (not sure how this works in Haskell)
+-- ✅ Component lifecycle & component cleanup
+-- Component caching
 
+type ComponentID = String
+type Component i o = String -> i -> React o
+type Component_ o = String -> React o
 
-newtype RegisterComponent = RegisterComponent (CompID -> React () -> React ())
-registerComponent :: CompID -> React () -> React ()
+newtype RegisterComponent = RegisterComponent (CompID -> IO () -> React ())
+registerComponent :: CompID -> IO () -> React ()
 registerComponent compID cleanup = do
     useContext >>= \case
       Nothing -> return ()
       Just (RegisterComponent f) -> f compID cleanup
 
-mountComponent ::  Component props -> String -> props -> React Vty.Image
-mountComponent (Component {renderComponent}) componentID props = do
+component ::  (props -> React result) -> Component props result
+component (renderComponent) componentID props = do
     parentCompID <- getCompID
     let newCompID = addCompID componentID parentCompID
     (a, cleanup) <- withContext newCompID $ shadowEffectNames $ trackCleanup $ trackSubComponents $ shadowStateMap $ renderComponent props
@@ -64,13 +67,13 @@ mountComponent (Component {renderComponent}) componentID props = do
       shadowStateMap child = do
         (readStateMap, updater) <- useState' (ShadowedState mempty)
         -- Clear component state on unmount
-        useMemo () $ registerCleanup $ (useSynchronous . atomically $ updater AwaitChange (const $ ShadowedState mempty))
+        useMemo () $ registerCleanup $ (atomically $ updater AwaitChange (const $ ShadowedState mempty))
         ShadowedState stateMap <- readStateMap
         withContext (StateMap (return stateMap, \b f -> coerce updater b f)) $ child
       shadowEffectNames :: React a -> React a
       shadowEffectNames (React m) =
           React . lift $ flip evalStateT 0 m
-      trackCleanup :: React a -> React (a, React ())
+      trackCleanup :: React a -> React (a, IO ())
       trackCleanup action = do
           (readCleanup, setCleanup) <- useNonRenderingStateVar mempty
           withContext (RegisterCleanup (\m -> setCleanup (>> m))) $ do
@@ -80,7 +83,7 @@ mountComponent (Component {renderComponent}) componentID props = do
       -- State inside this function just doesn't work and I have no clue why.
       trackSubComponents :: React a -> React a
       trackSubComponents m = do
-          compMapVar <- useOnce . useSynchronous $ newTVarIO (mempty :: M.Map CompID (React ()))
+          compMapVar <- useOnce . useSynchronous $ newTVarIO (mempty :: M.Map CompID (IO ()))
           prevCompMap <- useSynchronous $ readTVarIO compMapVar
           useSynchronous . atomically . writeTVar compMapVar $ mempty
           a <- withContext (RegisterComponent (\compID cleanup -> do
@@ -93,9 +96,9 @@ mountComponent (Component {renderComponent}) componentID props = do
           when (not . null $ M.keys mountedComponents)
             $ useDebug ("Mounting", M.keys mountedComponents)
           -- Run any relevant cleanup
-          fold $ unmountedComponents
+          useSynchronous . fold $ unmountedComponents
           return a
-      addCleanup :: React () -> Maybe (React ()) -> Maybe (React ())
+      addCleanup :: IO () -> Maybe (IO ()) -> Maybe (IO ())
       addCleanup cleanup Nothing = Just cleanup
       addCleanup cleanup (Just existing) = Just (existing >> cleanup)
 

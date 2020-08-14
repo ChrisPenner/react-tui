@@ -16,8 +16,8 @@ newtype EventGetter = EventGetter (TChan Vty.Event)
 useTermEvent :: (Typeable sentinel, Eq sentinel) => sentinel -> (Vty.Event -> IO ()) -> React ()
 useTermEvent sentinel handler = do
     mEventGetter <- useContext
-    debugIO <- useDebugIO 
-    useEffect sentinel $ do
+    debugIO <- useDebugIO
+    useAsync sentinel $ do
         debugIO "Kicking off term event"
         case mEventGetter of
             Just (EventGetter eventChan) -> do

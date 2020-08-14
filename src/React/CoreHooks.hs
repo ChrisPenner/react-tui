@@ -9,34 +9,36 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE DerivingVia #-}
-module React.CoreHooks (
 
-withContext,
-adjustContext,
-useContext,
-useContextWithDefault,
-useState,
-useOnce,
-useMemo,
-useEffect,
-useDebug,
-useDebugIO,
-withDebugger,
-useExit,
-
--- For plugin authors
-registerCleanup,
-useNonRenderingState,
-useSynchronous,
-getCompID,
--- Internal
- useNonRenderingStateVar,
- useState',
-    SMap,
-    StateMap(..),
-    RegisterCleanup(..),
-    AppAction(..),
-                       ) where
+module React.CoreHooks
+    ( withContext
+    , adjustContext
+    , useContext
+    , useContextWithDefault
+    , useState
+    , useOnce
+    , useMemo
+    , useEffect
+    , useAsync
+    , useDebug
+    , useDebugIO
+    , withDebugger
+    , useExit
+      -- For plugin authors
+    , registerCleanup
+    , useNonRenderingState
+    , useSynchronous
+    , getCompID
+      -- Internal
+    , useNonRenderingStateVar
+    , useState'
+    , SMap
+    , StateMap(..)
+    , RegisterCleanup(..)
+    , AppAction(..)
+    , CompID
+    , addCompID
+    ) where
 
 import qualified Graphics.Vty as Vty
 import Control.Applicative
@@ -75,6 +77,15 @@ useExit :: React (IO ())
 useExit = do
     StateMap (_, updater) <- fromJust <$> useContext
     return (atomically $ updater ShutdownApp id)
+
+newtype CompID = CompID [String]
+  deriving newtype (Typeable, Eq, Ord)
+
+instance Show CompID where
+  show (CompID path) = L.intercalate "/" $ reverse path
+
+addCompID :: String -> CompID -> CompID
+addCompID c (CompID cs) = CompID (c:cs)
 
 newtype Debugger = Debugger (CompID -> String -> IO ())
 useDebug :: Show a => a -> React ()
@@ -174,22 +185,24 @@ useMemo sentinel action = do
            return output
 
 -- Effect should return a "cleanup" function to deregister the effect.
-useEffect :: forall sentinel a. (Typeable sentinel, Eq sentinel) =>  sentinel -> IO () -> React ()
+useEffect :: forall sentinel a. (Typeable sentinel, Eq sentinel) =>  sentinel -> IO (IO ()) -> React ()
 useEffect sentinel effect = do
-    (prevCleanup, setCleanup) <- useNonRenderingState @(React ()) (return ())
+    (prevCleanup, setCleanup) <- useNonRenderingState @(IO ()) (return ())
     lastSentinel <- useLast sentinel
     case lastSentinel of
         Just s | s == sentinel -> return ()
         _ -> do
-            prevCleanup
-            cleanup <- runEffect
+            useSynchronous . async $ prevCleanup
+            cleanup <- useSynchronous $ effect
             registerCleanup cleanup
             setCleanup (const cleanup)
-  where
-    runEffect = do
-        useDebug "Registering Cancel"
-        handle <- useSynchronous $ async (void effect)
-        return $ useSynchronous (cancel handle) >> useDebug "Thread killed"
+
+-- A wrapper around use-effect which runs the effect asyncronously and calls cancel on it for
+-- cleanup
+useAsync :: (Typeable sentinel, Eq sentinel) => sentinel -> IO () -> React ()
+useAsync s m = useEffect s $ do
+    handle <- async m
+    return (cancel handle)
 
 getStateToken :: React String
 getStateToken = show <$> React (modify succ *> get)
@@ -199,10 +212,10 @@ useOnce = useMemo ()
 
 useUnmount :: IO () -> React ()
 useUnmount m = do
-    useMemo () $ registerCleanup . useSynchronous $ m
+    useMemo () $ registerCleanup m
 
-newtype RegisterCleanup = RegisterCleanup (React () -> React ())
-registerCleanup :: React () -> React ()
+newtype RegisterCleanup = RegisterCleanup (IO () -> React ())
+registerCleanup :: IO () -> React ()
 registerCleanup m = do
     useContext >>= \case
       Nothing -> return ()

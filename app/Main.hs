@@ -23,47 +23,42 @@ import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM
 import Control.Concurrent.Async
 
-import GHC.Clock
-
-helloWorld :: Component ()
-helloWorld = Component $ \_ -> do
+helloWorld :: Component () Vty.Image
+helloWorld = component $ \() -> do
     renderText "Hello, world!"
 
 newtype Name = Name TL.Text
 
-sayHello :: Component ()
-sayHello = Component $ \_ -> do
+sayHello :: Component () Vty.Image
+sayHello = component $ \() -> do
     Name name <- useContextWithDefault (Name "stranger")
     renderText $ "Hello, " <> name
 
-sayHelloTo :: Component TL.Text
-sayHelloTo = Component $ \name -> do
-    withContext (Name name) $ mountComponent sayHello "hello" ()
+sayHelloTo :: Component TL.Text Vty.Image
+sayHelloTo = component $ \name -> do
+    withContext (Name name) $ sayHello "hello" ()
 
-simpleStateTracker :: Component ()
-simpleStateTracker = Component (const $ useState (0 :: Int) *> renderText "yo")
+simpleStateTracker :: Component () Vty.Image
+simpleStateTracker = component (const $ useState (0 :: Int) *> renderText "yo")
 
-timer :: Component ()
-timer = Component $ \() -> do
-    -- debug "rendered timer"
+timer :: Component () Vty.Image
+timer = component $ \() -> do
     (counter, setCounter) <- useState (0 :: Int)
-    -- lstKey <- mountComponent lastKey "asldkj" ()
-    lstKey <- if counter < 5 || counter > 10 then mountComponent lastKey "asldkj" (HasKeyboardFocus (counter `mod` 2 == 0), return ())
+    lstKey <- if counter < 5 || counter > 10 then lastKey "asldkj" (HasKeyboardFocus (counter `mod` 2 == 0), return ())
                     else return mempty
-    useEffect () $ do
-        forever $ do
-            threadDelay 1000000
-            setCounter succ
+    useAsync () $ forever $ do
+                    threadDelay 1000000
+                    setCounter succ
     (lstKey Vty.<->) <$> (renderText $ "Counter: " <> TL.pack (show counter))
 
-favNumber :: Component ()
-favNumber = Component $ \() -> do
+favNumber :: Component () Vty.Image
+favNumber = component $ \() -> do
     (favNumber, _) <- useState (42 :: Int)
     renderText $ "Favourite Number: " <> TL.pack (show favNumber)
 
 newtype HasKeyboardFocus = HasKeyboardFocus Bool
-lastKey :: Component (HasKeyboardFocus, IO ())
-lastKey = Component $ \(HasKeyboardFocus hasKeyboardFocus, toggle) -> do
+lastKey :: Component (HasKeyboardFocus, IO ()) Vty.Image
+lastKey = component $ \(HasKeyboardFocus hasKeyboardFocus, toggle) -> do
     (keypress, setKeypress) <- useState "No events"
     shutdown <- useExit
     debugIO <- useDebugIO
@@ -79,29 +74,22 @@ lastKey = Component $ \(HasKeyboardFocus hasKeyboardFocus, toggle) -> do
         _ -> return ()
     renderText $ "Last Keypress: " <> keypress
 
-boxed :: Component a -> Component a
-boxed cmp = Component $ \props -> do
-    img <- mountComponent cmp "child" props
+boxed :: Component a Vty.Image -> Component a Vty.Image
+boxed cmp = component $ \props -> do
+    img <- cmp "child" props
     let w = Vty.imageWidth img
     let h = Vty.imageHeight img
     let horBorder = Vty.text defAttr $ TL.replicate (fromIntegral w) "#"
     let vertBorder = vertCat $ L.replicate (h + 2) (Vty.text defAttr "#")
     return $ vertBorder Vty.<|> (horBorder <-> img <-> horBorder) Vty.<|> vertBorder
 
-flipflopper :: Component ()
-flipflopper = Component $ \_ -> do
+flipflopper :: Component () Vty.Image
+flipflopper = component $ \_ -> do
   (flipflop, setFlipFlop) <- useState False
   useDebug flipflop
-  i2 <- mountComponent lastKey "flip" (HasKeyboardFocus flipflop, setFlipFlop not)
-  i3 <- mountComponent lastKey "flop" (HasKeyboardFocus (not flipflop), setFlipFlop not)
+  i2 <- lastKey "flip" (HasKeyboardFocus flipflop, setFlipFlop not)
+  i3 <- lastKey "flop" (HasKeyboardFocus (not flipflop), setFlipFlop not)
   return ( i2 Vty.<-> i3)
-
--- data Selected = A | B | C
---   deriving (Eq, Ord)
--- routeFocus :: Component ()
--- routeFocus = Component $ \_ -> do
---     (selected, setSelected) <- useState A
---     case selected of
 
 writeLogs :: TQueue T.Text -> String -> String -> IO ()
 writeLogs queue compID msg = do
@@ -111,4 +99,4 @@ main :: IO ()
 main = do
     debugLogsVar <- newTQueueIO
     withAsync (forever $ atomically (readTQueue debugLogsVar) >>= T.appendFile "log") $ const $ do
-        runVty (withDebugger (writeLogs debugLogsVar) $ mountComponent something "something" ())
+        runVty (withDebugger (writeLogs debugLogsVar) $ flipflopper "something" ())
