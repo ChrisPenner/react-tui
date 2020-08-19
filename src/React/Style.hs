@@ -18,7 +18,9 @@ import Control.Lens
 import Lib
 
 newtype Width a = Width {getWidth :: a}
+  deriving Show
 newtype Height a = Height {getHeight :: a}
+  deriving Show
 
 data Constraint = Stretch | Natural | Ratio Float | Fixed Int
 makePrisms ''Constraint
@@ -40,36 +42,41 @@ data Dir = Horizontal | Vertical
   deriving Eq
 
 constrainWidth :: Int -> React a -> React a
-constrainWidth w = adjustContext (\(Constraints _ h) -> Constraints w h)
+constrainWidth w m = do
+    (_, Height h) <- useConstraints
+    withContext (Constraints w h) m
 
 constrainHeight :: Int -> React a -> React a
-constrainHeight h = adjustContext (\(Constraints w _) -> Constraints w h)
+constrainHeight h m = do
+    (Width w, _) <- useConstraints
+    withContext (Constraints w h) m
 
 flex :: Dir -> [(Constraint, React Vty.Image)] -> React Vty.Image
 flex dir pieces = joiner <$> do
-    constraints <- useConstraints
-    (rs :: [Either (Constraint, React Vty.Image) Vty.Image]) <- for pieces $ \case
-      (Natural, r) -> Right <$> r
-      (Fixed n, r) -> do
-          Right <$> constrainWidth n r
-      x -> pure $ Left x
-    let consumed = sumOf (folded . _Right . to measureImage) rs
-    let remainder = max 0 (viewportSize constraints - consumed)
-    nextRs <- for rs $ \case
-      Left (Ratio n, r) -> do
-          Right <$> (constrain (n `percentOf` viewportSize constraints) $ r)
-      x -> do
-          pure $ x
-    let consumed' = sumOf (folded . _Right . to measureImage) nextRs
-    let remainder' = max 0 (viewportSize constraints - consumed')
-    let numStretch = lengthOf (folded . _Left . _1 . filteredBy (_Stretch)) nextRs
-    for nextRs $ \case
-      Left (Stretch, r) -> do
-          (constrain (floor $ fromIntegral remainder' / fromIntegral numStretch) $ r)
-      Left _ -> do
-          error "Got unexpected sizing type"
-      Right img -> do
-          return img
+    useConstraints >>= \case
+      constraints -> do
+          (rs :: [Either (Constraint, React Vty.Image) Vty.Image]) <- for pieces $ \case
+            (Natural, r) -> Right <$> r
+            (Fixed n, r) -> do
+                Right <$> constrain n r
+            x -> pure $ Left x
+          let consumed = sumOf (folded . _Right . to measureImage) rs
+          let remainder = max 0 (viewportSize constraints - consumed)
+          nextRs <- for rs $ \case
+            Left (Ratio n, r) -> do
+                Right <$> (constrain (n `percentOf` viewportSize constraints) $ r)
+            x -> do
+                pure $ x
+          let consumed' = sumOf (folded . _Right . to measureImage) nextRs
+          let remainder' = max 0 (viewportSize constraints - consumed')
+          let numStretch = lengthOf (folded . _Left . _1 . filteredBy (_Stretch)) nextRs
+          for nextRs $ \case
+            Left (Stretch, r) -> do
+                (constrain (floor $ fromIntegral remainder' / fromIntegral numStretch) $ r)
+            Left _ -> do
+                error "Got unexpected sizing type"
+            Right img -> do
+                return img
   where
     (joiner, measureImage, constrain, viewportSize) = case dir of
         Horizontal -> (Vty.horizCat, Vty.imageWidth, constrainWidth, getWidth . fst)
@@ -85,13 +92,13 @@ charBlock = component $ \c -> do
     return $ Vty.charFill Vty.defAttr c w h
 
 hundo :: Component () Vty.Image
-hundo = component $ \() -> do
+hundo = component $ \() ->  do
     flex Horizontal [(Stretch, charBlock "char" '#'), (Ratio 0.5, charBlock "char" '+'), (Stretch, charBlock "char" '&')]
 
 centerIsh :: React Vty.Image -> Component () Vty.Image
-centerIsh c = component $ \() -> do
-    flex Horizontal [(Stretch, charBlock "char" '&'), (Natural, c), (Stretch, charBlock "char" '&')]
-    -- flex Vertical [(Stretch, charBlock "char" '='), (Natural, inner), (Stretch, charBlock "char" '=')]
+centerIsh c = component $ \() ->  do
+    let inner = constrainHeight 1 $ flex Horizontal [(Stretch, charBlock "char" '&'), (Natural, c), (Stretch, charBlock "char" '&')]
+    flex Vertical [(Stretch, charBlock "char" '='), (Natural, inner), (Stretch, charBlock "char" '=')]
 
 useConstraints :: React (Width Int, Height Int)
 useConstraints = do
@@ -101,16 +108,18 @@ useConstraints = do
 
 withDir :: Dir -> Constraint -> React a -> React a
 withDir d sz m = do
-    c <- useConstraints
-    case sz of
-        (Ratio r) -> constrain (r `percentOf` size c) m
-        (Fixed f) -> constrain f m
-        Natural -> m
-        Stretch -> m
+    useContext >>= \case
+        Nothing -> m
+        Just c -> do
+            case sz of
+                (Ratio r) -> constrain (r `percentOf` size c) m
+                (Fixed f) -> constrain f m
+                Natural -> m
+                Stretch -> m
   where
     (constrain, size) = case d of
-        Horizontal -> (constrainWidth, getWidth . fst)
-        Vertical -> (constrainHeight, getHeight . snd)
+        Horizontal -> (constrainWidth, width)
+        Vertical -> (constrainHeight, height)
 
 withHeight :: Constraint -> React a -> React a
 withHeight = withDir Vertical

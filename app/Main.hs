@@ -97,10 +97,15 @@ writeLogs :: TQueue T.Text -> String -> String -> IO ()
 writeLogs queue compID msg = do
     atomically $ writeTQueue queue $ T.pack (compID <> ": "<> msg <> "\n")
 
+renderViewport :: Component () Vty.Image
+renderViewport = component $ \() -> do
+    (w, h) <- useConstraints
+    renderText (TL.pack . show $ (w, h))
+
 main :: IO ()
 main = do
     debugLogsVar <- newTQueueIO
     withAsync (forever $ atomically (readTQueue debugLogsVar) >>= T.appendFile "log") $ const $ do
-        runVty (withDebugger (writeLogs debugLogsVar) $ centerIsh (renderText "Hello good friend of mine") "hundo" ())
+        runVty (withDebugger (writeLogs debugLogsVar) $ centerIsh (renderViewport "viewport" ()) "hundo" ())
 
             --fmap snd $ editor "editor" defaultEditorSettings)
