@@ -11,6 +11,7 @@ import Control.Monad
 import Control.Concurrent.Async
 import React.App
 import Data.Typeable
+import Data.Maybe
 
 newtype EventGetter = EventGetter (TChan Vty.Event)
 useTermEvent :: (Typeable sentinel, Eq sentinel) => sentinel -> (Vty.Event -> IO ()) -> React ()
@@ -46,10 +47,27 @@ withShutdown vty m = do
         _ -> return ()
     withContext (Shutdown (Vty.shutdown vty)) m
 
+useViewport :: React (Int, Int)
+useViewport = useContext >>= \case
+  Nothing -> return (0, 0)
+  Just (Viewport w h) -> return (w, h)
+
+data Viewport = Viewport {viewportWidth :: Int, viewportHeight :: Int}
 runVty :: React Vty.Image -> IO ()
-runVty r = do
+runVty m = do
     vty <- Vty.mkVty Vty.defaultConfig
     eventChan <- newBroadcastTChanIO
+    (width, height) <- Vty.displayBounds . outputIface $ vty
     withAsync (forever $ Vty.nextEvent vty >>= atomically . writeTChan eventChan) $ const $ do
-        run ((withEvents eventChan .  withShutdown vty) r) (Vty.update vty . Vty.picForImage)
+        run ((withEvents eventChan .  withShutdown vty) $ wrapper width height) $ \img -> do
+            Vty.update vty . Vty.picForLayers $ [img]
     Vty.shutdown vty
+  where
+    wrapper width height = do
+        (vp, setViewport) <- useState (Viewport width height)
+        useTermEvent () $ \case
+            Vty.EvResize w h -> setViewport (const $ Viewport w h)
+            _ -> return ()
+        withContext vp m
+    bgLayer = backgroundFill
+

@@ -23,6 +23,7 @@ import Data.Text as T
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM
 import Control.Concurrent.Async
+import React.Style
 
 helloWorld :: Component () Vty.Image
 helloWorld = component $ \() -> do
@@ -100,4 +101,6 @@ main :: IO ()
 main = do
     debugLogsVar <- newTQueueIO
     withAsync (forever $ atomically (readTQueue debugLogsVar) >>= T.appendFile "log") $ const $ do
-        runVty (withDebugger (writeLogs debugLogsVar) . fmap snd $ editor "editor" defaultEditorSettings)
+        runVty (withDebugger (writeLogs debugLogsVar) $ centerIsh (renderText "Hello good friend of mine") "hundo" ())
+
+            --fmap snd $ editor "editor" defaultEditorSettings)

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: b6ae53051747bb30e28537dc5f264dac440139f2eba53e3e1e7f49da76ad30b3
+-- hash: 64ac2c0ab72fcbf7890a18b0070d7481e736deb6caa2a89e6a626aa979154e3f
 
 name:           react-tui
 version:        0.1.0.0
@@ -33,6 +33,7 @@ library
       React.Component
       React.CoreHooks
       React.Editor
+      React.Style
       React.Vty
   other-modules:
       Paths_react_tui
@@ -42,6 +43,7 @@ library
       async
     , base >=4.7 && <5
     , containers
+    , lens
     , mtl
     , stm
     , text
@@ -60,6 +62,7 @@ executable react-tui-exe
       async
     , base >=4.7 && <5
     , containers
+    , lens
     , mtl
     , react-tui
     , stm
@@ -80,6 +83,7 @@ test-suite react-tui-test
       async
     , base >=4.7 && <5
     , containers
+    , lens
     , mtl
     , react-tui
     , stm

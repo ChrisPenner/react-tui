@@ -28,6 +28,7 @@ dependencies:
 - typerep-map
 - stm
 - async
+- lens
 
 library:
   source-dirs: src
