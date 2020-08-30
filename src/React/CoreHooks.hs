@@ -18,8 +18,9 @@ module React.CoreHooks
     , useState
     , useOnce
     , useMemo
-    , useEffect
+    , useEffectVar
     , useAsync
+    , useAsyncVar
     , useDebug
     , useDebugIO
     , withDebugger
@@ -196,6 +197,21 @@ useEffect sentinel effect = do
             cleanup <- useSynchronous $ effect
             registerCleanup cleanup
             setCleanup (const cleanup)
+
+-- Effect should return a "cleanup" function to deregister the effect.
+useEffectVar :: forall sentinel. (Typeable sentinel) =>  sentinel -> (TVar sentinel -> IO (IO ())) -> React ()
+useEffectVar sentinel effect = do
+    tVar <- useMemo () $ useSynchronous $ newTVarIO sentinel
+    useSynchronous . atomically $ writeTVar tVar sentinel
+    cleanup <- useSynchronous $ effect tVar
+    registerCleanup cleanup
+
+-- Effect should return a "cleanup" function to deregister the effect.
+useAsyncVar :: forall sentinel. (Typeable sentinel) => sentinel -> (TVar sentinel -> IO ()) -> React ()
+useAsyncVar sentinel effect = do
+    useEffectVar sentinel $ \tvar -> do
+        handle <- async (effect tvar)
+        return (cancel handle)
 
 -- A wrapper around use-effect which runs the effect asyncronously and calls cancel on it for
 -- cleanup

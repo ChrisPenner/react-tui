@@ -66,7 +66,7 @@ editor :: Component EditorSettings (TL.Text, Vty.Image)
 editor = component $ \(EditorSettings initialEditorState multiline) -> do
     (e, updateEditor) <- useState initialEditorState
     let update = updateEditor . overSelected
-    useTermEvent () $ \case
+    useTermEvent () . const $ \case
         Vty.EvKey (Vty.KChar 'a') [MCtrl] -> update beginning
         Vty.EvKey (Vty.KChar 'e') [MCtrl] -> update end
         Vty.EvKey (Vty.KChar 'd') [MCtrl] -> update del

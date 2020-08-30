@@ -14,16 +14,16 @@ import Data.Typeable
 import Data.Maybe
 
 newtype EventGetter = EventGetter (TChan Vty.Event)
-useTermEvent :: (Typeable sentinel, Eq sentinel) => sentinel -> (Vty.Event -> IO ()) -> React ()
+useTermEvent :: (Typeable sentinel, Eq sentinel) => sentinel -> (TVar sentinel -> Vty.Event -> IO ()) -> React ()
 useTermEvent sentinel handler = do
     mEventGetter <- useContext
     debugIO <- useDebugIO
-    useAsync sentinel $ do
+    useAsyncVar sentinel $ \tvar -> do
         debugIO "Kicking off term event"
         case mEventGetter of
             Just (EventGetter eventChan) -> do
                 localChan <- atomically $ dupTChan eventChan
-                forever $ atomically (readTChan localChan) >>= handler
+                forever $ atomically (readTChan localChan) >>= handler tvar
             Nothing -> return ()
 
 useShutdown :: React (IO ())
@@ -42,7 +42,7 @@ newtype Shutdown = Shutdown (IO ())
 withShutdown :: Vty.Vty -> React a -> React a
 withShutdown vty m = do
     exit <- useExit
-    useTermEvent () $ \case
+    useTermEvent () . const $ \case
         Vty.EvKey (Vty.KChar 'c') _ -> exit
         _ -> return ()
     withContext (Shutdown (Vty.shutdown vty)) m
@@ -65,7 +65,7 @@ runVty m = do
   where
     wrapper width height = do
         (vp, setViewport) <- useState (Viewport width height)
-        useTermEvent () $ \case
+        useTermEvent () . const $ \case
             Vty.EvResize w h -> setViewport (const $ Viewport w h)
             _ -> return ()
         withContext vp m

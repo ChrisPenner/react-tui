@@ -64,13 +64,14 @@ lastKey = component $ \(HasKeyboardFocus hasKeyboardFocus, toggle) -> do
     (keypress, setKeypress) <- useState "No events"
     shutdown <- useExit
     debugIO <- useDebugIO
-    useTermEvent hasKeyboardFocus $ \evt -> do
-      debugIO $ ("hasKeyboard", hasKeyboardFocus)
+    useTermEvent hasKeyboardFocus $ \hasFocusVar evt ->  do
       case evt of
         Vty.EvKey (Vty.KChar 'q') _ -> shutdown
         Vty.EvKey (Vty.KChar 'c') _ -> shutdown
         Vty.EvKey key _ -> do
-            when hasKeyboardFocus $ do
+            hasFocus <- readTVarIO hasFocusVar
+            debugIO $ ("hasKeyboard", hasKeyboardFocus)
+            when hasFocus $ do
                 toggle
                 setKeypress (const $ TL.pack $ show key)
         _ -> return ()
@@ -108,11 +109,8 @@ paddingTest = component $ \() -> do
     b <- renderText "Yo, wassup!"
     return $ Vty.vertCat [a, b]
 
-
 main :: IO ()
 main = do
     debugLogsVar <- newTQueueIO
     withAsync (forever $ atomically (readTQueue debugLogsVar) >>= T.appendFile "log") $ const $ do
-        runVty (withDebugger (writeLogs debugLogsVar) $ paddingTest "main" ())
-
-            --fmap snd $ editor "editor" defaultEditorSettings)
+        runVty (withDebugger (writeLogs debugLogsVar) $ flipflopper "main" ())
