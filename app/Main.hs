@@ -18,8 +18,8 @@ import React.Editor
 import React.App
 import React.CoreHooks
 import React.Vty
-import Data.Text.IO as T
-import Data.Text as T
+import qualified Data.Text.IO as T
+import qualified Data.Text as T
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM
 import Control.Concurrent.Async
@@ -100,12 +100,19 @@ writeLogs queue compID msg = do
 renderViewport :: Component () Vty.Image
 renderViewport = component $ \() -> do
     (w, h) <- useConstraints
-    renderText (TL.pack . show $ (w, h))
+    center $ renderText (TL.pack . show $ (w, h))
+
+paddingTest :: Component () Vty.Image
+paddingTest = component $ \() -> do
+    a <- padAll 2 $ renderText "Hello, World!"
+    b <- renderText "Yo, wassup!"
+    return $ Vty.vertCat [a, b]
+
 
 main :: IO ()
 main = do
     debugLogsVar <- newTQueueIO
     withAsync (forever $ atomically (readTQueue debugLogsVar) >>= T.appendFile "log") $ const $ do
-        runVty (withDebugger (writeLogs debugLogsVar) $ centerIsh (renderViewport "viewport" ()) "hundo" ())
+        runVty (withDebugger (writeLogs debugLogsVar) $ paddingTest "main" ())
 
             --fmap snd $ editor "editor" defaultEditorSettings)
